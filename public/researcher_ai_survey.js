@@ -864,12 +864,38 @@ function switchWorkspaceTab(paperId, tab){
 function renderAIMessages(paperId){
   const wrap = document.getElementById('aiMessages-' + paperId);
   if (!wrap) return;
+  // Rebuilt purely from DATA.ai_chats — the thinking indicator is transient
+  // UI state and is never part of this array, so it can never leak into the
+  // research transcript or get sent back to the backend as conversation history.
   wrap.innerHTML = DATA.ai_chats[paperId].map(m => `
     <div class="ai-msg ${m.role}">
       <span class="ai-msg-role">${m.role === 'user' ? 'You' : 'AI Assistant'}</span>
       ${escapeHtml(m.content)}
     </div>`).join('');
   wrap.scrollTop = wrap.scrollHeight;
+  // If a request is still pending for this paper (e.g. the participant switched
+  // tabs and back while waiting), restore the thinking indicator.
+  if (aiSendInFlight[paperId]) addThinkingMessage(paperId);
+}
+
+function addThinkingMessage(paperId){
+  const wrap = document.getElementById('aiMessages-' + paperId);
+  if (!wrap) return;
+  if (document.getElementById('aiThinking-' + paperId)) return; // already showing
+  const thinking = document.createElement('div');
+  thinking.className = 'ai-msg assistant thinking';
+  thinking.id = 'aiThinking-' + paperId;
+  thinking.innerHTML = `
+    <span class="thinking-dot"></span>
+    <span class="thinking-dot"></span>
+    <span class="thinking-dot"></span>
+  `;
+  wrap.appendChild(thinking);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function removeThinkingMessage(paperId){
+  document.getElementById('aiThinking-' + paperId)?.remove();
 }
 
 async function callBackendChat(paperId, userMessage){
@@ -904,14 +930,14 @@ function handleAIInputKeydown(e, paperId){
 }
 
 async function sendAIMessage(paperId){
-  if (aiSendInFlight[paperId]) return; // prevent duplicate submissions
+  if (aiSendInFlight[paperId]) return; // prevent duplicate requests (Send click or repeated Enter)
   const input = document.getElementById('aiInput-' + paperId);
   const sendBtn = document.getElementById('aiSendBtn-' + paperId);
   const text = (input.value || '').trim();
-  if (!text) return;
+  if (!text) return; // ignore empty / whitespace-only submissions
 
   aiSendInFlight[paperId] = true;
-  if (sendBtn) sendBtn.disabled = true;
+  if (sendBtn){ sendBtn.disabled = true; sendBtn.textContent = 'Thinking…'; }
   if (input) input.disabled = true;
 
   DATA.ai_chats[paperId].push({ role:'user', content:text, ts: nowIso() });
@@ -921,18 +947,21 @@ async function sendAIMessage(paperId){
     DATA.timing[paperId].first_ai_message_iso = nowIso();
   }
   input.value = '';
-  renderAIMessages(paperId);
+  renderAIMessages(paperId); // shows the participant's message immediately
+  addThinkingMessage(paperId); // transient three-dot indicator — not part of DATA.ai_chats
 
   try {
     const reply = await callBackendChat(paperId, text);
+    removeThinkingMessage(paperId);
     DATA.ai_chats[paperId].push({ role:'assistant', content: reply, ts: nowIso() });
   } catch (err){
-    console.error('AI chat error for', paperId, err);
-    DATA.ai_chats[paperId].push({ role:'assistant', content:'Sorry, the AI assistant is unavailable right now. Please try again in a moment.', ts: nowIso() });
+    console.error('AI chat error for', paperId, err); // detailed error stays in the console only
+    removeThinkingMessage(paperId);
+    DATA.ai_chats[paperId].push({ role:'assistant', content:'The assistant could not respond right now. Please try again.', ts: nowIso() });
   } finally {
     renderAIMessages(paperId);
     aiSendInFlight[paperId] = false;
-    if (sendBtn) sendBtn.disabled = false;
+    if (sendBtn){ sendBtn.disabled = false; sendBtn.textContent = 'Send'; }
     if (input) input.disabled = false;
     input && input.focus();
   }
