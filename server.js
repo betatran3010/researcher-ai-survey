@@ -37,6 +37,12 @@ const chatLimiter = rateLimit({
 // ---------- Static frontend ----------
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Serve the survey as the root page (the HTML file isn't named index.html,
+// so express.static won't pick it up automatically at "/").
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'researcher_ai_survey.html'));
+});
+
 // ---------- Input limits ----------
 const MAX_USER_MESSAGE_LEN = 4000;
 const MAX_STUDY_TEXT_LEN = 60000;
