@@ -14,7 +14,7 @@ body{background:radial-gradient(circle at top left,rgba(0,50,98,.045),transparen
 .progress-track{position:fixed;top:0;left:0;right:0;height:4px;background:var(--border);z-index:100;}
 .progress-fill{height:100%;background:linear-gradient(90deg,var(--navy),var(--warm-gray),var(--terra));width:0%;transition:width .25s;}
 .top-meta{display:none;}
-.site-header{padding:30px 32px 28px;text-align:center;border-bottom:1px solid var(--border);background:#ffffff;box-shadow:0 4px 18px rgba(0,50,98,.045);}
+.site-header{padding:22px 28px 20px;text-align:center;border-bottom:1px solid var(--border);background:#ffffff;box-shadow:0 4px 18px rgba(0,50,98,.045);}
 .site-header h1{font-family:'Inter',sans-serif;font-size:2.3rem;font-weight:800;color:var(--navy);letter-spacing:-0.035em;line-height:1.15;}
 .site-header p{margin-top:8px;color:var(--text-light);font-size:1.02rem;max-width:720px;margin-left:auto;margin-right:auto;}
 .page{display:none;max-width:920px;margin:0 auto;padding:64px 32px 120px;animation:fadeIn .35s ease;}
@@ -191,6 +191,217 @@ body.condition-ai .noai-only{display:none!important;}
 .fullscreen-required-overlay .btn-primary:hover{background:var(--terra-light);}
 .exit-screen{max-width:640px;margin:120px auto;text-align:center;padding:0 24px;}
 .exit-screen p{color:var(--text-light);font-size:1.05rem;line-height:1.75;}
+
+/* ============================================================
+   Compact general-survey layout
+   Reproduces approximately the appearance of the original
+   interface at 75% browser zoom while the browser remains at 100%.
+
+   This is intentionally scoped to .survey-page.
+   It does not affect study task pages or quiz pages.
+   ============================================================ */
+
+.page.survey-page {
+  width: calc(100% - 48px);
+  max-width: 690px; /* 75% of the original 920px */
+  margin-left: auto;
+  margin-right: auto;
+  padding: 48px 24px 90px;
+}
+
+/* Consent-page header only */
+.site-header {
+  padding: 17px 24px 15px;
+}
+
+.site-header h1 {
+  font-size: 1.725rem; /* 75% of 2.3rem */
+}
+
+/* General headings and text */
+.survey-page h1 {
+  font-size: 1.575rem;
+}
+
+.survey-page h2 {
+  font-size: 1.24rem;
+}
+
+.survey-page h3 {
+  font-size: 0.95rem;
+}
+
+.survey-page p {
+  font-size: 0.93rem;
+  line-height: 1.65;
+}
+
+.survey-page .muted {
+  font-size: 0.9rem;
+  line-height: 1.65;
+}
+
+.survey-page .section-title {
+  font-size: 1.05rem;
+}
+
+.survey-page .section-number {
+  width: 24px;
+  height: 24px;
+  font-size: 0.7rem;
+}
+
+.survey-page .section-label {
+  gap: 10px;
+  padding: 6px 0 18px;
+}
+
+/* Cards */
+.survey-page .q-card {
+  padding: 27px 30px;
+  margin-bottom: 21px;
+  border-radius: 15px;
+}
+
+.survey-page .q-card.intro-card {
+  padding: 27px 30px;
+}
+
+.survey-page .consent-box {
+  padding: 27px 30px;
+  margin: 21px 0;
+  border-radius: 15px;
+}
+
+/* Explicit consent-intro overrides because #intro is more specific */
+.survey-page #intro h2 {
+  font-size: 1.24rem;
+  margin-bottom: 14px;
+}
+
+.survey-page #intro p {
+  font-size: 0.9rem;
+  line-height: 1.65;
+  margin-bottom: 11px;
+}
+
+/* Questions and options */
+.survey-page .q-label {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+
+.survey-page .q-sublabel {
+  font-size: 0.8rem;
+  margin-bottom: 10px;
+}
+
+.survey-page .input-label {
+  font-size: 0.8rem;
+}
+
+.survey-page .option-item {
+  gap: 11px;
+  padding: 14px 15px;
+  min-height: 44px;
+  border-radius: 11px;
+}
+
+.survey-page .option-text {
+  font-size: 0.9rem;
+}
+
+.survey-page .option-dot {
+  width: 15px;
+  height: 15px;
+}
+
+/* Inputs */
+.survey-page input[type="text"],
+.survey-page input[type="number"],
+.survey-page select {
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+}
+
+.survey-page textarea {
+  padding: 12px 14px;
+  min-height: 112px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+}
+
+/* Scales and sliders */
+.survey-page .likert-item {
+  margin-bottom: 17px;
+  padding-bottom: 17px;
+}
+
+.survey-page .likert-statement {
+  font-size: 0.87rem;
+  margin-bottom: 9px;
+}
+
+.survey-page .likert-btn {
+  min-height: 32px;
+  font-size: 0.76rem;
+}
+
+.survey-page .slider-block {
+  margin-bottom: 22px;
+  padding-bottom: 22px;
+}
+
+.survey-page .slider-q {
+  font-size: 0.84rem;
+  margin-bottom: 10px;
+}
+
+.survey-page .slider-end {
+  font-size: 0.74rem;
+}
+
+.survey-page .conf-label {
+  font-size: 0.82rem;
+}
+
+/* Consent controls */
+.survey-page .consent-box p {
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.survey-page .consent-check span {
+  font-size: 0.84rem;
+}
+
+.survey-page .check-box {
+  width: 17px;
+  height: 17px;
+}
+
+/* Responsive safety */
+@media (max-width: 760px) {
+  .page.survey-page {
+    width: calc(100% - 24px);
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .survey-page .q-card,
+  .survey-page .q-card.intro-card,
+  .survey-page .consent-box {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .site-header h1 {
+    font-size: 1.45rem;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -201,11 +412,10 @@ body.condition-ai .noai-only{display:none!important;}
 
 <div class="site-header" id="siteHeader">
   <h1>How Researchers Read and Evaluate Papers</h1>
-  <p>A short study on how researchers read, evaluate, and reason about scientific materials.</p>
 </div>
 
 <!-- ============ 0. CONSENT ============ -->
-<div class="page active" id="page-consent">
+<div class="page survey-page active" id="page-consent">
   <div id="intro">
     <div class="q-card intro-card">
       <h2>Before we begin</h2>
@@ -233,7 +443,7 @@ body.condition-ai .noai-only{display:none!important;}
 
       <p>Some questions will ask for your own interpretations, evaluations, or opinions. There are no right or wrong answers to these questions. Please answer based on your own understanding and judgment. You may refrain from answering any questions that make you uncomfortable and may withdraw your participation at any time, even after completing the study, without penalty.</p>
 
-      <p><strong>Benefits.</strong> There is no direct benefit to you, but you may find the task interesting. You will also be making an important contribution to improving our understanding of how people evaluate research materials.</p>
+      <p><strong>Benefits.</strong> There is no direct benefit to you, but you may find the task interesting. You will also be making an important contribution to improving our understanding of how researchers evaluate research materials.</p>
 
       <p><strong>Risks and discomforts.</strong> We do not expect you to face any foreseeable risks from your participation. There is the unlikely possibility that your confidentiality will be compromised; however, we have taken measures to minimize this risk.</p>
 
@@ -283,7 +493,7 @@ body.condition-ai .noai-only{display:none!important;}
 </div>
 
 <!-- ============ EXIT SCREEN (decline / not familiar with AI) ============ -->
-<div class="page" id="page-exit">
+<div class="page survey-page" id="page-exit">
   <div class="exit-screen">
     <h2>Thank you for your interest.</h2>
     <p>You have chosen not to participate in this study, or you indicated that you are not familiar with AI assistants. No action is required on your part. We appreciate you taking the time to read this information.</p>
@@ -291,13 +501,16 @@ body.condition-ai .noai-only{display:none!important;}
 </div>
 
 <!-- ============ 1. ABOUT YOU ============ -->
-<div class="page" id="page-about-you">
+<div class="page survey-page" id="page-about-you">
   <div class="section-label"><div class="section-number" id="secnum-about-you">1</div><div class="section-title">About You</div></div>
   <div class="q-card">
     <div class="q-label">Age</div><input type="number" id="ay_age" min="16" max="100">
   </div>
   <div class="q-card">
-    <div class="q-label">Country</div><input type="text" id="ay_country">
+    <div class="q-label">Country</div>
+    <select id="ay_country" required>
+      <option value="" disabled selected>Select your country</option>
+    </select>
   </div>
   <div class="q-card">
     <div class="q-label">First language</div>
@@ -317,7 +530,7 @@ body.condition-ai .noai-only{display:none!important;}
 </div>
 
 <!-- ============ 2. HOW YOU APPROACH RESEARCH WORK (SRL) ============ -->
-<div class="page" id="page-srl">
+<div class="page survey-page" id="page-srl">
   <div class="section-label"><div class="section-number" id="secnum-srl">2</div><div class="section-title">How You Approach Research Work</div></div>
   <p class="muted" style="margin-bottom:16px;">Please indicate how well the following statements describe the way you typically approach scholarly work related to research. Answer based on how you usually behave, not how you think you should behave. There are no right or wrong answers.</p>
   <p class="q-sublabel" style="margin-top:0;">1 = Not at all true for me, 7 = Very true for me</p>
@@ -325,14 +538,14 @@ body.condition-ai .noai-only{display:none!important;}
 </div>
 
 <!-- ============ CRITICAL-THINKING SCALE (shared template, placed pre or post) ============ -->
-<div class="page" id="page-ct">
+<div class="page survey-page" id="page-ct">
   <div class="section-label"><div class="section-number" id="secnum-ct">3</div><div class="section-title">How You Evaluate Research Claims</div></div>
   <div id="ctIntroText"></div>
   <div class="q-card" id="ctWrap"></div>
 </div>
 
 <!-- ============ 4. EXPERIENCE WITH AI ASSISTANTS IN RESEARCH ============ -->
-<div class="page" id="page-ai-experience">
+<div class="page survey-page" id="page-ai-experience">
   <div class="section-label"><div class="section-number" id="secnum-ai-experience">4</div><div class="section-title">Experience with AI Assistants in Research</div></div>
   <div class="q-card">
     <div class="q-label">Which of the following feels most like what AI assistants are to you? Choose the one that fits best, even if none is perfect.</div>
@@ -367,7 +580,7 @@ body.condition-ai .noai-only{display:none!important;}
 </div>
 
 <!-- ============ 5. TASK INSTRUCTIONS ============ -->
-<div class="page" id="page-instructions">
+<div class="page survey-page" id="page-instructions">
   <div class="section-label"><div class="section-number" id="secnum-task">5</div><div class="section-title">Task</div></div>
   <div class="q-card">
     <div id="instructionsText"></div>
@@ -381,7 +594,7 @@ body.condition-ai .noai-only{display:none!important;}
 <div class="page study-page" id="page-study-3"></div>
 
 <!-- ============ 6. FINAL REFLECTIONS ============ -->
-<div class="page" id="page-reflections">
+<div class="page survey-page" id="page-reflections">
   <div class="section-label"><div class="section-number" id="secnum-reflections">6</div><div class="section-title">Reflections</div></div>
   <div class="q-card">
     <div class="q-label">How confident are you in your responses for each study?</div>
@@ -417,7 +630,7 @@ body.condition-ai .noai-only{display:none!important;}
 <div id="quizPagesContainer"></div>
 
 <!-- ============ 9. DEBRIEF ============ -->
-<div class="page" id="page-debrief">
+<div class="page survey-page" id="page-debrief">
   <div class="section-label"><div class="section-number" id="secnum-debrief">8</div><div class="section-title">Debrief</div></div>
   <div class="q-card">
     <p>The purpose of this study is to understand how people evaluate research claims, reason about evidence, and, for some participants, with or without AI tools during scientific reasoning tasks. To study these processes fairly, we did not want participants' responses to depend on prior knowledge of a real topic, article, or research area. For that reason, the research articles you read were artificially constructed for this study and were not real published research papers. The findings, statistics, citations, and implications in the articles were included as part of the study materials and should not be treated as established scientific evidence or as advice for real-world decisions.</p>

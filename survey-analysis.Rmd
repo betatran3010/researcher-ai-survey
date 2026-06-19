@@ -1,0 +1,3005 @@
+---
+title: "Gopnik AI"
+author: "Tran Le, tnl22"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Read Survey Responses
+
+```{r read-data}
+library(ggplot2)
+library(gridExtra)
+survey_path <- "227_participants.csv"
+
+survey_raw <- read.csv(
+  survey_path,
+  stringsAsFactors = FALSE,
+  na.strings = c("", "NA"),
+  fileEncoding = "UTF-8"
+)
+
+survey <- survey_raw
+```
+
+## Clean Variable Types
+
+```{r clean-types}
+# Convert true/false fields.
+survey$ai_used <- tolower(survey$ai_used) == "true"
+survey$assigned_was_top_choice <- tolower(survey$assigned_was_top_choice) == "true"
+survey$low_domain_frequency <- tolower(survey$low_domain_frequency) == "true"
+
+# Convert numeric survey and task variables.
+numeric_cols <- c(
+  "total_duration_ms",
+  "consent_page_duration_ms",
+  "first_impressions_duration_ms",
+  "what_kind_of_thing_is_ai_duration_ms",
+  "how_you_use_ai_duration_ms",
+  "ai_use_frequency_duration_ms",
+  "your_experience_of_ai_duration_ms",
+  "about_you_duration_ms",
+  "a_short_task_duration_ms",
+  "freq_information_guidance",
+  "freq_writing_communication",
+  "freq_coding_math_technical",
+  "freq_creative_work",
+  "freq_learning_understanding",
+  "freq_advice_decisions",
+  "freq_summarizing_opinions",
+  "freq_automation_repetitive",
+  "hours_per_week",
+  "exp_ai_does_work_vs_user_decides",
+  "exp_independent_vs_reliant",
+  "exp_existing_info_vs_creating_new",
+  "exp_instrument_vs_point_of_view",
+  "age",
+  "task_selection_top_frequency",
+  "self_reported_freq_in_assigned_category",
+  "confidence_level",
+  "epistemic_ownership",
+  "time_before_ai_ms",
+  "ai_visible_duration_ms",
+  "response_started_ms",
+  "response_submitted_ms",
+  "task_duration_ms",
+  "jaccard_similarity_to_ai"
+)
+
+for (col in intersect(numeric_cols, names(survey))) {
+  survey[[col]] <- suppressWarnings(as.numeric(survey[[col]]))
+}
+
+# Make key categorical variables easier to work with.
+survey$ai_kind_choice <- factor(survey$ai_kind_choice)
+survey$assigned_category <- factor(survey$assigned_category)
+survey$highest_education <- factor(survey$highest_education)
+survey$ai_understanding <- factor(survey$ai_understanding)
+
+survey$ai_use_tenure <- factor(
+  survey$ai_use_tenure,
+  levels = c(
+    "I do not use them, or am just starting out.",
+    "Less than 6 months",
+    "6 to 12 months",
+    "1 to 2 years",
+    "More than 2 years"
+  ),
+  ordered = TRUE
+)
+
+survey$ai_reading_depth <- factor(
+  survey$ai_reading_depth,
+  levels = c("not_read", "glanced", "skimmed", "read_carefully"),
+  ordered = TRUE
+)
+```
+
+## Mixed Regression Models
+
+The main research question is whether participants' pre-task beliefs about AI and independence predict cognitive offloading during the task.
+
+Here, "cognitive offloading" is measured in three related ways:
+
+1.  **AI access:** whether the participant used the AI assistant at all (`ai_used`).
+2.  **AI uptake:** how similar the participant's final answer was to the pre-written AI response. I report both lexical overlap (`jaccard_similarity_to_ai`) and, after the embedding section is computed, semantic similarity (`embedding_cosine_similarity_to_ai`).
+3.  **Epistemic ownership:** whether the participant said the final response reflected mostly AI thinking or mostly their own thinking (`epistemic_ownership`).
+
+The mixed part of the model is `(1 | task_id)`. This means the model allows each task prompt/pre-written AI response to have its own baseline. That matters because some tasks may naturally make people more likely to use or copy AI than others.
+
+```{r model-setup}
+library(lme4)
+
+# lmerTest adds p-values to the linear mixed models.
+library(lmerTest)
+
+z <- function(x) as.numeric(scale(x))
+# z = (person's score - sample mean) / sample standard deviation
+
+model_data <- survey
+model_data$task_id <- factor(model_data$task_id)
+
+# Two pre-task independence sliders, kept as separate predictors (r = .20,
+# too low to justify combining into a composite).
+# Higher values mean the participant described themselves as doing the work /
+# staying independent.
+model_data$z_user_decides <- z(model_data$exp_ai_does_work_vs_user_decides)
+model_data$z_independent <- z(-model_data$exp_independent_vs_reliant) # reverse
+
+# Low inter-item correlation; treat as separate predictors rather than a composite.
+cor(model_data$z_user_decides, model_data$z_independent, use = "complete.obs")
+
+# Control variables.
+model_data$z_hours_per_week <- z(model_data$hours_per_week)
+model_data$z_instrument_vs_point_of_view <- z(model_data$exp_instrument_vs_point_of_view)
+model_data$z_existing_info_vs_creating_new <- z(model_data$exp_existing_info_vs_creating_new)
+model_data$z_jaccard_similarity_to_ai <- z(model_data$jaccard_similarity_to_ai)
+
+# Binary recode of epistemic ownership.
+# 1-3 = primarily AI's thinking (0); 5-7 = primarily own thinking (1).
+# Six participants at the midpoint (4) are excluded from binary ownership models.
+model_data$epistemic_ownership_binary <- ifelse(
+  model_data$epistemic_ownership <= 3, 0L,
+  ifelse(model_data$epistemic_ownership >= 5, 1L, NA_integer_)
+)
+
+# Binary reading depth: read_carefully (1) vs. anything less (0).
+# Used in place of the ordered 1-4 numeric scale because ~57% of AI users
+# reported reading_carefully, leaving few observations in the lower categories.
+model_data$read_carefully <- as.integer(
+  model_data$ai_reading_depth == "read_carefully"
+)
+
+# Use the original epistemic ownership scale.
+# Original scale: 1 = mostly AI's thinking, 7 = mostly my thinking.
+# Higher values mean more of the participant's own thinking.
+ai_users <- subset(model_data, ai_used == TRUE)
+```
+
+```{r fixed-effects-helper, include=FALSE}
+fixed_effects_table <- function(model, exponentiate = FALSE) {
+  coefs <- coef(summary(model))
+  output <- data.frame(
+    term = rownames(coefs),
+    estimate = coefs[, "Estimate"],
+    std_error = coefs[, "Std. Error"],
+    row.names = NULL
+  )
+
+  if ("Pr(>|t|)" %in% colnames(coefs)) {
+    output$p_value <- coefs[, "Pr(>|t|)"]
+  }
+
+  if ("Pr(>|z|)" %in% colnames(coefs)) {
+    output$p_value <- coefs[, "Pr(>|z|)"]
+  }
+
+  if (exponentiate) {
+    output$odds_ratio <- exp(output$estimate)
+  }
+
+  output
+}
+```
+
+## Model 1: Do Pre-Task Independence Beliefs Predict Whether People Use AI?
+
+This model asks whether participants who described themselves as more independent on either pre-task slider were less likely to consult the AI assistant during the task. The two independence items are entered as separate predictors: `z_user_decides` (higher = participant prefers to do the work themselves) and `z_independent` (higher = participant expects to stay more independent).
+
+Outcome: `ai_used`\
+Model type: mixed logistic regression\
+Random intercept: `task_id`
+
+```{r model-ai-used}
+model_ai_used <- glmer(
+  ai_used ~ z_user_decides +
+    z_independent +
+    z_hours_per_week +
+    z_instrument_vs_point_of_view +
+    (1 | task_id),
+  data = model_data,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_ai_used)
+fixed_effects_table(model_ai_used, exponentiate = TRUE)
+```
+
+**The `user_decides` independence slider significantly predicted lower odds of using the AI assistant, OR = 0.45, p \< .001.** Participants who more strongly said the user does the work / makes the decisions were less likely to consult AI. The separate `z_independent` slider was not significant, OR = 0.88, p = .436. Hours per week was marginal but not significant, OR = 1.37, p = .085, and instrument-vs-point-of-view beliefs were not significant, OR = 1.18, p = .290.
+
+The mixed model produced a singular fit (task_id random intercept variance = 0). As a robustness check, a fixed-effects logistic regression was fit without the random intercept.
+
+```{r model-ai-used-glm-check}
+model_ai_used_glm <- glm(
+  ai_used ~ z_user_decides +
+    z_independent +
+    z_hours_per_week +
+    z_instrument_vs_point_of_view,
+  data = model_data,
+  family = binomial
+)
+
+summary(model_ai_used_glm)
+fixed_effects_table(model_ai_used_glm, exponentiate = TRUE)
+```
+
+## Model 2: Do Pre-Task Independence Beliefs Predict Text Similarity To AI?
+
+This model only uses participants who consulted the AI assistant. It asks whether people who described themselves as more independent on either slider nevertheless produced answers that were more similar to the AI response.
+
+**Note on distribution:** Among AI users (n = 158), `jaccard_similarity_to_ai` is severely bimodal. Approximately 35% of AI users (n = 55) had a Jaccard score of exactly 1.0, meaning their response was an exact copy of the pre-written AI response. The remaining participants show a spread of lower values (median approx. 0.31). This bimodality should be kept in mind when interpreting linear models on this outcome. Models are retained as-is, but effects should be interpreted as reflecting this two-group structure.
+
+Outcome: `jaccard_similarity_to_ai`\
+Model type: linear mixed regression\
+Random intercept: `task_id`
+
+```{r model-similarity}
+model_similarity <- lmer(
+  jaccard_similarity_to_ai ~ z_user_decides +
+    z_independent +
+    z_hours_per_week +
+    z_instrument_vs_point_of_view +
+    (1 | task_id),
+  data = ai_users
+)
+
+summary(model_similarity)
+fixed_effects_table(model_similarity)
+```
+
+Among participants who used the AI assistant, neither pre-task independence predictor significantly predicted Jaccard similarity to the AI response: `z_user_decides`, b = -0.042, p = .206; `z_independent`, b = -0.041, p = .238. Hours per week, b = 0.014, p = .657, and instrument-vs-point-of-view beliefs, b = 0.015, p = .663, were also not significant predictors. This AI-user-only result is weaker than the all-participant correlations reported in the sample-scope check below.
+
+## Model 3: Does Objective AI Uptake Predict Epistemic Ownership?
+
+This model asks whether participants whose answers were more similar to the AI response were less likely to feel the response reflected their own thinking. Because `epistemic_ownership` is U-shaped (many 1s, 2s, 6s, 7s; few responses near the midpoint), it is recoded as binary: 0 = primarily AI's thinking (scores 1-3) vs. 1 = primarily own thinking (scores 5-7). The 14 AI users at the midpoint (4) are excluded.
+
+Outcome: `epistemic_ownership_binary` (0 = AI's thinking, 1 = own thinking)\
+Model type: mixed logistic regression\
+Random intercept: `task_id`
+
+```{r model-epistemic-ownership}
+model_epistemic_ownership <- glmer(
+  epistemic_ownership_binary ~ z_jaccard_similarity_to_ai +
+    z_user_decides +
+    z_independent +
+    z_hours_per_week +
+    (1 | task_id),
+  data = ai_users,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_epistemic_ownership)
+fixed_effects_table(model_epistemic_ownership, exponentiate = TRUE)
+```
+
+**Greater Jaccard similarity to the AI response significantly predicted lower odds of reporting primarily own-thinking ownership, OR = 0.32, p \< .001.** Neither independence predictor nor hours per week was significant (`z_user_decides`, OR = 1.23, p = .313; `z_independent`, OR = 0.93, p = .722; hours per week, OR = 1.14, p = .509).
+
+## Model 4: Do Pre-Task Independence Beliefs Moderate How People Interpret AI Influence?
+
+For example, imagine two participants both have high similarity to the AI response:
+
+Participant A rated themselves as not very independent. Participant B rated themselves as very independent.
+
+So the interaction asks: does Participant B, the independent person, give a higher epistemic ownership rating than Participant A, although both produced AI-like answers?
+
+Because the two independence sliders are separate predictors, there are two interaction terms:
+
+-   `z_user_decides:z_jaccard_similarity_to_ai`
+-   `z_independent:z_jaccard_similarity_to_ai`
+
+Although sample size has increased to n = 158 AI users, interaction effects require substantial power and should still be interpreted cautiously.
+
+Outcome: `epistemic_ownership_binary` (0 = AI's thinking, 1 = own thinking)\
+Model type: mixed logistic regression with interactions\
+Random intercept: `task_id`
+
+```{r model-contrast}
+model_contrast <- glmer(
+  epistemic_ownership_binary ~
+    z_user_decides * z_jaccard_similarity_to_ai +
+    z_independent * z_jaccard_similarity_to_ai +
+    z_hours_per_week +
+    (1 | task_id),
+  data = ai_users,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_contrast)
+fixed_effects_table(model_contrast, exponentiate = TRUE)
+```
+
+**Greater AI similarity again significantly predicted lower odds of reporting primarily own-thinking ownership, OR = 0.31, p \< .001.** Neither interaction with independence beliefs was significant (`z_user_decides` x similarity: OR = 1.12, p = .647; `z_independent` x similarity: OR = 0.80, p = .395), indicating that the uptake-to-ownership link did not differ reliably by pre-task independence beliefs.
+
+**Altogether**: Pre-task independence beliefs mattered most for whether participants opened AI, not how much they copied after opening it. **The `user_decides` slider predicted lower AI use, OR = 0.45, p \< .001**, but neither independence slider significantly predicted Jaccard similarity among AI users. **Participants' post-task ownership ratings tracked behavioral uptake: higher similarity predicted lower odds of primarily own-thinking ownership in both ownership models, ORs = 0.32 and 0.31, ps \< .001.** This suggests that participants were at least partly aware of the AI's contribution. Neither independence predictor moderated this uptake-to-ownership link.
+
+## Sample-Scope Check: All Participants vs. AI Users
+
+Several apparent contrasts depend on whether the analysis includes all participants or only people who actually opened the AI assistant. This matters because non-AI users have low or zero AI uptake by design, so all-participant associations partly capture the decision to use AI at all.
+
+Across all participants (N = 227), the composite independence score was negatively related to Jaccard similarity, **Pearson r = -.23, p \< .001**; Spearman rho = -.22, p \< .001. This matches the broader direction found by the mentor: participants who described themselves as more independent tended to produce less AI-similar final responses overall. However, among AI users only, the individual independence sliders did not significantly predict Jaccard similarity in Model 2. This suggests independence beliefs mainly predicted whether people opened AI, rather than how much they copied after opening it.
+
+Domain-specific AI-use frequency shows the same sample-scope issue. Across all participants, domain frequency was weakly positively related to Jaccard similarity using Pearson correlation, r = .13, p = .043, but not using Spearman correlation, rho = .10, p = .116. In the AI-user-only regression in Analysis 7, domain frequency did not predict Jaccard similarity, b = -0.013, p = .757. **The clearest domain-frequency result is AI access itself: people who reported using AI more often in the assigned task domain were more likely to open AI, OR = 1.82, p \< .001.**
+
+The timing data also show that AI use usually happened early. Among AI users, 78 of 158 participants (49%) opened AI within 50 seconds, and 153 of the 157 participants with both timing values started writing after opening AI. This supports the interpretation that most AI users consulted the assistant before drafting their own response.
+
+------------------------------------------------------------------------
+
+**Note on exploratory analyses (Analyses 1-8):** All analyses below are exploratory. They were motivated by theory and by inspection of the data but were not pre-registered. No correction for multiple comparisons is applied across analyses. Within each analysis, Tukey adjustments are used for pairwise comparisons. Results should be interpreted as hypothesis-generating rather than confirmatory, and any significant findings should be treated with appropriate caution pending replication.
+
+------------------------------------------------------------------------
+
+## Analysis 1: Does Conceptualizing AI Differently Predict Offloading?
+
+This analysis asks whether participants' answer to "What kind of thing is AI?" predicts cognitive offloading during the short task.
+
+This connects most directly to the paper *Large AI models are cultural and social technologies*. That paper argues that large AI models should not only be understood as agents, but also as cultural/social technologies similar to writing, print, libraries, markets, bureaucracies, and other systems for organizing human knowledge.
+
+Because this is exploratory, I do pairwise comparisons. This means I compare every AI conceptualization category with every other category. The models use sum/effects coding for `ai_kind_choice`, so no conceptualization group is treated as the reference group; the pairwise `emmeans()` results are the main comparisons to interpret.
+
+Only 8 participants selected "Writing or print" overall, and only 6 of those participants used the AI assistant. Because that group is too small for stable comparisons, I exclude it from Analysis 1. This means the pairwise comparisons below include the remaining four categories.
+
+```{r ai-kind-setup}
+library(emmeans)
+
+concept_data <- subset(model_data, ai_kind_choice != "Writing or print")
+concept_data$ai_kind_choice <- droplevels(concept_data$ai_kind_choice)
+
+# Use sum/effects coding so no AI conceptualization category is treated as
+# the reference category in the model parameterization.
+contrasts(concept_data$ai_kind_choice) <- contr.sum(
+  nlevels(concept_data$ai_kind_choice)
+)
+
+concept_ai_users <- subset(concept_data, ai_used == TRUE)
+concept_ai_users$ai_kind_choice <- droplevels(concept_ai_users$ai_kind_choice)
+contrasts(concept_ai_users$ai_kind_choice) <- contr.sum(
+  nlevels(concept_ai_users$ai_kind_choice)
+)
+
+table(concept_data$ai_kind_choice, useNA = "ifany")
+table(concept_ai_users$ai_kind_choice, useNA = "ifany")
+```
+
+### Analysis 1A: AI Conceptualization Predicting Whether Participants Used AI
+
+Outcome: `ai_used`\
+Model type: mixed logistic regression\
+Predictor: `ai_kind_choice`\
+Random intercept: `task_id`
+
+This model asks whether people who conceptualized AI differently were more or less likely to consult the optional AI assistant during the task. The model uses sum/effects coding so no category is treated as the reference category. The `drop1()` result tests whether `ai_kind_choice` as a whole improves the model. The `emmeans()` results show estimated AI-use probabilities for each conceptualization group, and the pairwise comparisons show Tukey-adjusted differences between groups.
+
+```{r ai-kind-ai-used}
+model_ai_kind_ai_used <- glmer(
+  ai_used ~ ai_kind_choice + (1 | task_id),
+  data = concept_data,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_ai_kind_ai_used)
+tests_ai_kind_ai_used <- drop1(model_ai_kind_ai_used, test = "Chisq")
+
+tests_ai_kind_ai_used
+
+emm_ai_kind_ai_used <- emmeans(
+  model_ai_kind_ai_used,
+  ~ ai_kind_choice,
+  type = "response"
+)
+
+emm_ai_kind_ai_used
+
+pairs_ai_kind_ai_used <- pairs(
+  emm_ai_kind_ai_used,
+  adjust = "tukey"
+)
+
+summary(pairs_ai_kind_ai_used, type = "response")
+```
+
+The overall effect of AI-kind was not significant, chi-squared(3) = 4.67, p = .198. The colleague/advisor category had the highest estimated AI-use probability (.79), followed by calculator/tool (.67), library/search engine (.64), and market/aggregator (.64), but Tukey-adjusted pairwise comparisons were not significant. Overall, AI conceptualization did not reliably predict AI use, though descriptively AI use was highest when AI was seen as a colleague/advisor.
+
+The mixed model produced a singular-fit warning, with the random intercept variance for task_id estimated at zero. This suggests that the model found little evidence of residual variation between task prompts for this outcome, or that the random effect was too weak to estimate reliably. As a robustness check, I fit a simpler logistic regression without (1 \| task_id) to test whether the substantive conclusion changed.
+
+```{r ai-kind-ai-used-glm-check}
+model_ai_kind_ai_used_glm <- glm(
+  ai_used ~ ai_kind_choice,
+  data = concept_data,
+  family = binomial
+)
+
+summary(model_ai_kind_ai_used_glm)
+
+tests_ai_kind_ai_used_glm <- drop1(
+  model_ai_kind_ai_used_glm,
+  test = "Chisq"
+)
+
+tests_ai_kind_ai_used_glm
+
+emm_ai_kind_ai_used_glm <- emmeans(
+  model_ai_kind_ai_used_glm,
+  ~ ai_kind_choice,
+  type = "response"
+)
+
+emm_ai_kind_ai_used_glm
+
+pairs_ai_kind_ai_used_glm <- pairs(
+  emm_ai_kind_ai_used_glm,
+  adjust = "tukey"
+)
+
+summary(pairs_ai_kind_ai_used_glm, type = "response")
+```
+
+AI conceptualization did not significantly predict optional assistant use, chi-squared(3) = 4.67, p = .198. Participants who viewed AI as a colleague/advisor showed the highest estimated AI-use probability (.79), followed by calculator/tool (.67), library/search engine (.64), and market/aggregator (.64), but pairwise differences were not statistically reliable after Tukey adjustment.
+
+```{r ai-kind-ai-used-plot, fig.width=8, fig.height=4}
+# AI use rate by conceptualization (all participants including Writing or print)
+ai_kind_all <- subset(model_data, !is.na(ai_kind_choice))
+ai_kind_use_df <- do.call(rbind, lapply(
+  split(ai_kind_all, ai_kind_all$ai_kind_choice),
+  function(sub) {
+    data.frame(
+      ai_kind_choice = as.character(sub$ai_kind_choice[1]),
+      pct_used       = mean(sub$ai_used, na.rm = TRUE),
+      n              = nrow(sub),
+      stringsAsFactors = FALSE
+    )
+  }
+))
+
+kind_lookup2 <- c(
+  "A calculator or specialized tool" = "Calculator /\nspecialized tool",
+  "A colleague or advisor"           = "Colleague /\nadvisor",
+  "A library or search engine"       = "Library /\nsearch engine",
+  "A market or aggregator"           = "Market /\naggregator",
+  "Writing or print"                 = "Writing or\nprint"
+)
+ai_kind_use_df$kind_short <- kind_lookup2[ai_kind_use_df$ai_kind_choice]
+ai_kind_use_df$kind_short <- factor(
+  ai_kind_use_df$kind_short,
+  levels = ai_kind_use_df$kind_short[order(ai_kind_use_df$pct_used)]
+)
+
+ggplot(ai_kind_use_df, aes(x = kind_short, y = pct_used)) +
+  geom_col(fill = "#4472C4", width = 0.65) +
+  geom_text(
+    aes(label = paste0(round(pct_used * 100), "%")),
+    hjust = -0.12, size = 3.5, fontface = "bold"
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n), y = 0.01),
+    hjust = 0, size = 3, color = "white"
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    limits = c(0, 1.05), expand = c(0, 0),
+    labels = function(x) paste0(round(x * 100), "%")
+  ) +
+  labs(
+    title    = "AI Use Rate by AI Conceptualization",
+    subtitle = "% of participants who consulted the optional AI assistant",
+    x        = NULL,
+    y        = "% who used AI assistant"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    plot.title    = element_text(face = "bold", size = 12),
+    plot.subtitle = element_text(size = 10),
+    axis.text.y   = element_text(size = 10.5)
+  )
+```
+
+### Analysis 1B: AI Conceptualization Predicting Similarity To The AI Response
+
+Outcome: `jaccard_similarity_to_ai`\
+Model type: linear mixed regression\
+Predictor: `ai_kind_choice`\
+Random intercept: `task_id`\
+Sample: only participants who used the AI assistant
+
+This model asks whether people's conceptualization of AI predicted how much their final response resembled the pre-written AI response. The `emmeans()` results show the adjusted average similarity score for each conceptualization group, and the pairwise comparisons test whether any groups differ from one another.
+
+```{r ai-kind-similarity}
+model_ai_kind_similarity <- lmer(
+  jaccard_similarity_to_ai ~ ai_kind_choice + (1 | task_id),
+  data = concept_ai_users
+)
+
+summary(model_ai_kind_similarity)
+anova(model_ai_kind_similarity)
+
+emm_ai_kind_similarity <- emmeans(
+  model_ai_kind_similarity,
+  ~ ai_kind_choice
+)
+
+emm_ai_kind_similarity
+
+pairs_ai_kind_similarity <- pairs(
+  emm_ai_kind_similarity,
+  adjust = "tukey"
+)
+
+pairs_ai_kind_similarity
+```
+
+AI conceptualization did not significantly predict Jaccard similarity to the AI response (see ANOVA output above). Descriptively, mean Jaccard similarity ranged from .45 (Library/search engine) to .57 (Calculator/tool) across the four main groups, but differences were small and unreliable. Tukey-adjusted pairwise comparisons showed no significant differences between conceptualization groups.
+
+```{r ai-kind-similarity-plot, fig.width=8, fig.height=4}
+# Include all AI users (including Writing or print) for visualization only.
+jaccard_viz_data <- subset(
+  ai_users,
+  !is.na(ai_kind_choice) & !is.na(jaccard_similarity_to_ai)
+)
+jaccard_viz_data$ai_kind_choice <- droplevels(jaccard_viz_data$ai_kind_choice)
+
+kind_lookup <- c(
+  "A calculator or specialized tool" = "Calculator /\nspecialized tool",
+  "A colleague or advisor"           = "Colleague /\nadvisor",
+  "A library or search engine"       = "Library /\nsearch engine",
+  "A market or aggregator"           = "Market /\naggregator",
+  "Writing or print"                 = "Writing or\nprint"
+)
+
+library(ggplot2)
+# Compute group means and n for bar chart
+jac_kind_df <- do.call(rbind, lapply(
+  split(jaccard_viz_data, jaccard_viz_data$ai_kind_choice),
+  function(sub) {
+    data.frame(
+      ai_kind_choice = as.character(sub$ai_kind_choice[1]),
+      mean_jac       = mean(sub$jaccard_similarity_to_ai, na.rm = TRUE),
+      n              = sum(!is.na(sub$jaccard_similarity_to_ai)),
+      stringsAsFactors = FALSE
+    )
+  }
+))
+jac_kind_df$kind_short <- kind_lookup[jac_kind_df$ai_kind_choice]
+jac_kind_df$kind_short <- factor(
+  jac_kind_df$kind_short,
+  levels = jac_kind_df$kind_short[order(jac_kind_df$mean_jac)]
+)
+
+ggplot(jac_kind_df, aes(x = kind_short, y = mean_jac)) +
+  geom_col(fill = "#4472C4", width = 0.65) +
+  geom_text(
+    aes(label = sprintf("%.3f", mean_jac)),
+    hjust = -0.12, size = 3.5, fontface = "bold"
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n), y = 0.012),
+    hjust = 0, size = 3, color = "white"
+  ) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 0.74), expand = c(0, 0)) +
+  labs(
+    title    = "Mean Jaccard Similarity to AI Response by AI Conceptualization",
+    x        = NULL,
+    y        = "Mean Jaccard Similarity"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    plot.title    = element_text(face = "bold", size = 12),
+    plot.subtitle = element_text(size = 10),
+    axis.text.y   = element_text(size = 10.5)
+  )
+```
+
+### Analysis 1C: AI Conceptualization Predicting Epistemic Ownership
+
+Outcome: `epistemic_ownership_binary` (0 = AI's thinking, 1 = own thinking)\
+Model type: mixed logistic regression\
+Predictor: `ai_kind_choice`\
+Random intercept: `task_id`\
+Sample: only participants who used the AI assistant
+
+This model asks whether people's conceptualization of AI predicted whether they rated the final response as closer to AI thinking or their own thinking. Epistemic ownership is recoded as binary (see Model 3).
+
+```{r ai-kind-ownership}
+model_ai_kind_ownership <- glmer(
+  epistemic_ownership_binary ~ ai_kind_choice + (1 | task_id),
+  data = concept_ai_users,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_ai_kind_ownership)
+drop1(model_ai_kind_ownership, test = "Chisq")
+
+emm_ai_kind_ownership <- emmeans(
+  model_ai_kind_ownership,
+  ~ ai_kind_choice,
+  type = "response"
+)
+
+emm_ai_kind_ownership
+
+pairs_ai_kind_ownership <- pairs(
+  emm_ai_kind_ownership,
+  adjust = "tukey"
+)
+
+summary(pairs_ai_kind_ownership, type = "response")
+```
+
+AI conceptualization did not significantly predict binary epistemic ownership, chi-squared(3) = 0.93, p = .817. Estimated probabilities of primarily own-thinking ownership ranged from .28 to .38 across conceptualization groups, and Tukey-adjusted pairwise comparisons showed no significant differences.
+
+**Altogether:** Conceptualizing AI differently did not significantly predict AI use, similarity to the AI response, or epistemic ownership. Across all three outcomes, the colleague/advisor group showed descriptively higher values, but none of these patterns reached statistical significance. This suggests that participants' explicit mental model of AI was less predictive of cognitive offloading behavior than their actual task-level prompting behavior.
+
+## Analysis 2: Learning-Curve Analysis
+
+This analysis is inspired by the Anthropic Economic Index learning-curve report. The idea is that more experienced AI users may use AI differently over time: they may consult it differently, copy it differently, or become more aware of when it has shaped their thinking.
+
+Predictors:
+
+-   `ai_use_tenure`: how long the participant has been using AI assistants regularly
+-   `z_hours_per_week`: approximate weekly AI use (z-scored)
+-   `ai_understanding`: self-reported understanding of how AI assistants work
+
+Random intercept:
+
+-   `task_id`, because participants responded to different short-task prompts
+
+```{r learning-curve-setup}
+learning_curve_data <- subset(
+  model_data,
+  !is.na(ai_used) &
+    !is.na(ai_use_tenure) &
+    !is.na(hours_per_week) &
+    !is.na(ai_understanding) &
+    !is.na(task_id)
+)
+
+learning_curve_ai_users <- subset(
+  learning_curve_data,
+  ai_used == TRUE &
+    !is.na(jaccard_similarity_to_ai) &
+    !is.na(epistemic_ownership)
+)
+
+table(learning_curve_data$ai_use_tenure, useNA = "ifany")
+table(learning_curve_data$ai_understanding, useNA = "ifany")
+```
+
+### Analysis 2A: Do More Experienced Users Consult AI Differently?
+
+Outcome: `ai_used`\
+Model type: mixed logistic regression\
+Predictors: `ai_use_tenure`, `z_hours_per_week`, `ai_understanding`\
+Random intercept: `task_id`
+
+This model asks whether more experienced participants were more or less likely to click/use the optional AI assistant during the short task.
+
+```{r learning-curve-ai-used}
+model_learning_ai_used <- glmer(
+  ai_used ~ ai_use_tenure +
+    z_hours_per_week +
+    ai_understanding +
+    (1 | task_id),
+  data = learning_curve_data,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_learning_ai_used)
+
+tests_learning_ai_used <- drop1(
+  model_learning_ai_used,
+  test = "Chisq"
+)
+
+tests_learning_ai_used
+
+emm_learning_ai_used_tenure <- emmeans(
+  model_learning_ai_used,
+  ~ ai_use_tenure,
+  type = "response"
+)
+
+emm_learning_ai_used_tenure
+```
+
+**AI-use tenure significantly predicted use of the optional AI assistant, chi-squared(4) = 13.94, p = .0075.** Participants who reported not using AI or just starting out had a much lower estimated AI-use probability (.15) than all other tenure groups (.71-.81). This should still be interpreted cautiously because the smallest tenure group produces wide uncertainty. Hours per week, p = .296, and AI understanding, p = .878, were not significant predictors.
+
+```{r}
+model_learning_ai_used_glm <- glm(
+  ai_used ~ ai_use_tenure +
+    z_hours_per_week +
+    ai_understanding,
+  data = learning_curve_data,
+  family = binomial
+)
+
+summary(model_learning_ai_used_glm)
+
+tests_learning_ai_used_glm <- drop1(
+  model_learning_ai_used_glm,
+  test = "Chisq"
+)
+
+tests_learning_ai_used_glm
+
+emm_learning_ai_used_tenure_glm <- emmeans(
+  model_learning_ai_used_glm,
+  ~ ai_use_tenure,
+  type = "response"
+)
+
+emm_learning_ai_used_tenure_glm
+```
+
+Same results but the extreme predicted probabilities and very large standard errors suggest that this result should be interpreted cautiously.
+
+```{r tenure-ai-used-plot, fig.width=8, fig.height=4}
+tenure_levels <- c(
+  "I do not use them, or am just starting out.",
+  "Less than 6 months",
+  "6 to 12 months",
+  "1 to 2 years",
+  "More than 2 years"
+)
+tenure_labels_short <- c(
+  "Not using /\njust starting",
+  "< 6 months",
+  "6 -- 12 months",
+  "1 -- 2 years",
+  "> 2 years"
+)
+
+tenure_use_df <- do.call(rbind, lapply(
+  seq_along(tenure_levels),
+  function(i) {
+    sub <- subset(learning_curve_data, ai_use_tenure == tenure_levels[i])
+    if (nrow(sub) == 0) return(NULL)
+    data.frame(
+      tenure   = tenure_labels_short[i],
+      pct_used = mean(sub$ai_used, na.rm = TRUE),
+      n        = nrow(sub),
+      stringsAsFactors = FALSE
+    )
+  }
+))
+tenure_use_df$tenure <- factor(tenure_use_df$tenure, levels = tenure_labels_short)
+
+ggplot(tenure_use_df, aes(x = tenure, y = pct_used)) +
+  geom_col(fill = "#4472C4", width = 0.65) +
+  geom_text(
+    aes(label = paste0(round(pct_used * 100), "%")),
+    vjust = -0.4, size = 3.5, fontface = "bold"
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n), y = 0.02),
+    vjust = 0, size = 3, color = "white"
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1.05), expand = c(0, 0),
+    labels = function(x) paste0(round(x * 100), "%")
+  ) +
+  labs(
+    title    = "AI Use Rate by AI Experience Tenure",
+    subtitle = "% of participants who consulted the optional AI assistant",
+    x        = "AI Use Tenure",
+    y        = "% Used AI"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    plot.title    = element_text(face = "bold", size = 12),
+    plot.subtitle = element_text(size = 10),
+    axis.text.x   = element_text(size = 10)
+  )
+```
+
+### Analysis 2B: Do More Experienced Users Copy AI Differently?
+
+Outcome: `jaccard_similarity_to_ai`\
+Model type: linear mixed regression\
+Predictors: `ai_use_tenure`, `z_hours_per_week`, `ai_understanding`\
+Random intercept: `task_id`\
+Sample: only participants who used the AI assistant
+
+This model asks whether more experienced participants produced final responses that were more or less similar to the pre-written AI response.
+
+```{r learning-curve-similarity}
+model_learning_similarity <- lmer(
+  jaccard_similarity_to_ai ~ ai_use_tenure +
+    z_hours_per_week +
+    ai_understanding +
+    (1 | task_id),
+  data = learning_curve_ai_users
+)
+
+summary(model_learning_similarity)
+
+tests_learning_similarity <- anova(model_learning_similarity)
+
+tests_learning_similarity
+
+emm_learning_similarity_tenure <- emmeans(
+  model_learning_similarity,
+  ~ ai_use_tenure
+)
+
+emm_learning_similarity_tenure
+```
+
+AI-use tenure did not significantly predict Jaccard similarity to the AI response (see ANOVA output above). Descriptively, observed mean Jaccard ranged from .45 (1--2 years) to .57 (6--12 months) across tenure groups, with no consistent trend with experience level. Hours of AI use per week and self-rated AI understanding were also not significant predictors.
+
+### Analysis 2C: Do More Experienced Users Recognize AI Influence Differently?
+
+Outcome: `epistemic_ownership_binary` (0 = AI's thinking, 1 = own thinking)\
+Model type: mixed logistic regression\
+Predictors: `z_jaccard_similarity_to_ai`, `ai_use_tenure`, `z_hours_per_week`, `ai_understanding`\
+Interaction: `z_jaccard_similarity_to_ai * ai_use_tenure`\
+Random intercept: `task_id`\
+Sample: only participants who used the AI assistant
+
+This model asks whether the link between objective uptake and epistemic ownership differs by experience. Epistemic ownership is recoded as binary (see Model 3). The Jaccard predictor is z-scored for comparability.
+
+```{r learning-curve-ownership}
+model_learning_ownership <- glmer(
+  epistemic_ownership_binary ~ z_jaccard_similarity_to_ai *
+    ai_use_tenure +
+    z_hours_per_week +
+    ai_understanding +
+    (1 | task_id),
+  data = learning_curve_ai_users,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_learning_ownership)
+
+tests_learning_ownership <- drop1(model_learning_ownership, test = "Chisq")
+
+tests_learning_ownership
+
+ownership_similarity_slopes_by_tenure <- emtrends(
+  model_learning_ownership,
+  ~ ai_use_tenure,
+  var = "z_jaccard_similarity_to_ai"
+)
+
+ownership_similarity_slopes_by_tenure
+
+pairs(
+  ownership_similarity_slopes_by_tenure,
+  adjust = "tukey"
+)
+```
+
+**Higher Jaccard similarity predicted lower odds of reporting primarily own-thinking epistemic ownership, with negative similarity slopes across tenure groups.** The similarity-by-tenure interaction was not significant, chi-squared(3) = 0.58, p = .900. Hours per week, p = .545, and self-reported AI understanding, p = .640, were not significant predictors of epistemic ownership.
+
+**Altogether:** There is a limited experience effect. **AI-use tenure predicted whether participants consulted the optional assistant** (driven by near-zero use in the no-experience group), but experience did not meaningfully predict how much they copied or converged with the AI response, nor did it change the link between uptake and epistemic ownership.
+
+## Analysis 3: Task-Category Analysis
+
+This analysis asks whether different kinds of tasks invite different levels of AI use, uptake, ownership, or confidence.
+
+These models use fixed effects rather than random effects because `assigned_category` is the thing I want to compare directly. This means the models estimate differences between the six task categories, rather than treating task category as background variation. Adding a random intercept for `task_id` within category would likely produce singular fits given the small number of observations per scenario.
+
+```{r task-category-setup}
+library(emmeans)
+
+task_categories <- c(
+  "academic",
+  "creative",
+  "decisions",
+  "info",
+  "learning",
+  "writing"
+)
+
+task_category_data <- subset(
+  model_data,
+  assigned_category %in% task_categories
+)
+
+task_category_data$assigned_category <- factor(
+  task_category_data$assigned_category,
+  levels = task_categories
+)
+
+task_category_similarity_data <- subset(
+  task_category_data,
+  ai_used == TRUE & !is.na(jaccard_similarity_to_ai)
+)
+
+task_category_ownership_data <- subset(
+  task_category_data,
+  ai_used == TRUE & !is.na(epistemic_ownership)
+)
+
+task_category_confidence_data <- subset(
+  task_category_data,
+  !is.na(confidence_level)
+)
+
+table(task_category_data$assigned_category, useNA = "ifany")
+```
+
+```{r task-category-summary-helpers, include=FALSE}
+binary_category_summary <- function(data, outcome) {
+  summary_matrix <- aggregate(
+    data[[outcome]],
+    by = list(assigned_category = data$assigned_category),
+    FUN = function(x) {
+      c(
+        n = sum(!is.na(x)),
+        proportion = mean(x, na.rm = TRUE)
+      )
+    }
+  )
+
+  data.frame(
+    assigned_category = summary_matrix$assigned_category,
+    n = summary_matrix$x[, "n"],
+    proportion = summary_matrix$x[, "proportion"],
+    row.names = NULL
+  )
+}
+
+continuous_category_summary <- function(data, outcome) {
+  summary_matrix <- aggregate(
+    data[[outcome]],
+    by = list(assigned_category = data$assigned_category),
+    FUN = function(x) {
+      c(
+        n = sum(!is.na(x)),
+        mean = mean(x, na.rm = TRUE),
+        sd = sd(x, na.rm = TRUE),
+        median = median(x, na.rm = TRUE)
+      )
+    }
+  )
+
+  data.frame(
+    assigned_category = summary_matrix$assigned_category,
+    n = summary_matrix$x[, "n"],
+    mean = summary_matrix$x[, "mean"],
+    sd = summary_matrix$x[, "sd"],
+    median = summary_matrix$x[, "median"],
+    row.names = NULL
+  )
+}
+
+```
+
+### Analysis 3A: Does Task Category Predict Whether Participants Used AI?
+
+Outcome: `ai_used`\
+Model type: logistic regression\
+Predictor: `assigned_category`
+
+This model asks whether participants were more likely to open/use the optional AI assistant for some task categories than others.
+
+```{r task-category-ai-used-descriptive}
+binary_category_summary(task_category_data, "ai_used")
+```
+
+```{r task-category-ai-used}
+model_task_ai_used <- glm(
+  ai_used ~ assigned_category,
+  data = task_category_data,
+  family = binomial
+)
+
+summary(model_task_ai_used)
+
+tests_task_ai_used <- drop1(
+  model_task_ai_used,
+  test = "Chisq"
+)
+
+tests_task_ai_used
+
+emm_task_ai_used <- emmeans(
+  model_task_ai_used,
+  ~ assigned_category,
+  type = "response"
+)
+
+emm_task_ai_used
+
+pairs_task_ai_used <- pairs(
+  emm_task_ai_used,
+  adjust = "tukey"
+)
+
+summary(pairs_task_ai_used, type = "response")
+```
+
+Assigned task category did not significantly predict whether participants used the AI assistant, chi-squared(5) = 8.62, p = .125. Descriptively, AI use was highest in learning tasks (86%) and lowest in academic tasks (58%), with other categories between 65% and 71%. Tukey-adjusted pairwise comparisons were not significant.
+
+### Analysis 3B: Does Task Category Predict Similarity To The AI Response?
+
+Outcome: `jaccard_similarity_to_ai`\
+Model type: linear regression\
+Predictor: `assigned_category`\
+Sample: only participants who used the AI assistant
+
+This model asks whether participants copied, borrowed from, or converged with the AI response more in some task categories than others.
+
+```{r task-category-similarity-descriptive}
+continuous_category_summary(
+  task_category_similarity_data,
+  "jaccard_similarity_to_ai"
+)
+```
+
+```{r task-category-similarity}
+model_task_similarity <- lm(
+  jaccard_similarity_to_ai ~ assigned_category,
+  data = task_category_similarity_data
+)
+
+summary(model_task_similarity)
+
+tests_task_similarity <- anova(model_task_similarity)
+
+tests_task_similarity
+
+emm_task_similarity <- emmeans(
+  model_task_similarity,
+  ~ assigned_category
+)
+
+emm_task_similarity
+
+pairs_task_similarity <- pairs(
+  emm_task_similarity,
+  adjust = "tukey"
+)
+
+pairs_task_similarity
+```
+
+**Among AI users, assigned task category significantly predicted Jaccard similarity, F(5, 152) = 6.08, p \< .001.** Creative (M = .76) and writing (M = .72) tasks showed the highest similarity to the AI response, while decisions (M = .30) and learning (M = .36) showed the lowest. Tukey-adjusted comparisons showed that creative tasks were significantly higher than decisions (p = .001), info (p = .041), and learning (p = .003), and writing tasks were significantly higher than decisions (p = .003) and learning (p = .009).
+
+```{r task-category-combined-plot, fig.width=11, fig.height=4.5}
+# Mean Jaccard by category
+jac_cat_df <- do.call(rbind, lapply(
+  split(task_category_similarity_data,
+        task_category_similarity_data$assigned_category),
+  function(sub) {
+    data.frame(
+      assigned_category = as.character(sub$assigned_category[1]),
+      mean_jac          = mean(sub$jaccard_similarity_to_ai, na.rm = TRUE),
+      n                 = sum(!is.na(sub$jaccard_similarity_to_ai)),
+      stringsAsFactors  = FALSE
+    )
+  }
+))
+
+jac_cat_df$assigned_category <- factor(
+  jac_cat_df$assigned_category,
+  levels = jac_cat_df$assigned_category[order(jac_cat_df$mean_jac)]
+)
+
+p_jac <- ggplot(jac_cat_df, aes(x = assigned_category, y = mean_jac)) +
+  geom_col(fill = "#4472C4", width = 0.65) +
+  geom_text(
+    aes(label = sprintf("%.3f", mean_jac)),
+    hjust = -0.10, size = 3.2, fontface = "bold"
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n), y = 0.012),
+    hjust = 0, size = 3, color = "white"
+  ) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 0.98), expand = c(0, 0)) +
+  labs(title = "Mean Similarity to AI", x = NULL, y = "Mean Jaccard Similarity") +
+  theme_classic(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", size = 11),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+# AI use rate by category, using the same category order
+use_cat_df <- do.call(rbind, lapply(
+  split(task_category_data, task_category_data$assigned_category),
+  function(sub) {
+    data.frame(
+      assigned_category = as.character(sub$assigned_category[1]),
+      pct_used          = mean(sub$ai_used, na.rm = TRUE),
+      n                 = nrow(sub),
+      stringsAsFactors  = FALSE
+    )
+  }
+))
+
+use_cat_df$assigned_category <- factor(
+  use_cat_df$assigned_category,
+  levels = levels(jac_cat_df$assigned_category)
+)
+
+p_use <- ggplot(use_cat_df, aes(x = assigned_category, y = pct_used)) +
+  geom_col(fill = "#70AD47", width = 0.65) +
+  geom_text(
+    aes(label = paste0(round(pct_used * 100), "%")),
+    hjust = -0.10, size = 3.2, fontface = "bold"
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n), y = 0.02),
+    hjust = 0, size = 3, color = "white"
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    limits = c(0, 1.1), expand = c(0, 0),
+    labels = function(x) paste0(round(x * 100), "%")
+  ) +
+  labs(title = "AI Use Rate", x = NULL, y = "% Used AI") +
+  theme_classic(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", size = 11)
+  )
+
+grid.arrange(
+  p_use, p_jac,
+  ncol = 2,
+  top = grid::textGrob(
+    "AI Use Rate & Mean Jaccard Similarity to AI by Task Category",
+    gp = grid::gpar(fontface = "bold", fontsize = 13)
+  )
+)
+```
+### Analysis 3C: Does Task Category Predict Epistemic Ownership?
+
+Outcome: `epistemic_ownership_binary` (0 = AI's thinking, 1 = own thinking)\
+Model type: logistic regression\
+Predictor: `assigned_category`\
+Sample: only participants who used the AI assistant
+
+This model asks whether epistemic ownership ratings differed across task categories. Epistemic ownership is recoded as binary (see Model 3).
+
+```{r task-category-ownership-descriptive}
+binary_category_summary(
+  task_category_ownership_data,
+  "epistemic_ownership_binary"
+)
+```
+
+```{r task-category-ownership}
+model_task_ownership <- glm(
+  epistemic_ownership_binary ~ assigned_category,
+  data = task_category_ownership_data,
+  family = binomial
+)
+
+summary(model_task_ownership)
+
+tests_task_ownership <- drop1(model_task_ownership, test = "Chisq")
+
+tests_task_ownership
+
+emm_task_ownership <- emmeans(
+  model_task_ownership,
+  ~ assigned_category,
+  type = "response"
+)
+
+emm_task_ownership
+
+pairs_task_ownership <- pairs(
+  emm_task_ownership,
+  adjust = "tukey"
+)
+
+summary(pairs_task_ownership, type = "response")
+```
+
+Assigned task category did not significantly predict binary epistemic ownership, chi-squared(5) = 3.56, p = .615. Estimated probabilities of primarily own-thinking ownership varied descriptively from .25 in learning to .45 in academic tasks, but Tukey-adjusted pairwise comparisons were not significant.
+
+### Analysis 3D: Does Task Category Predict Confidence?
+
+Outcome: `confidence_level`\
+Model type: linear regression\
+Predictor: `assigned_category`
+
+This model asks whether participants felt more confident in their final response for some task categories than others. The confidence scale is treated as approximately continuous.
+
+```{r task-category-confidence-descriptive}
+continuous_category_summary(
+  task_category_confidence_data,
+  "confidence_level"
+)
+```
+
+```{r task-category-confidence}
+model_task_confidence <- lm(
+  confidence_level ~ assigned_category,
+  data = task_category_confidence_data
+)
+
+summary(model_task_confidence)
+
+tests_task_confidence <- anova(model_task_confidence)
+
+tests_task_confidence
+
+emm_task_confidence <- emmeans(
+  model_task_confidence,
+  ~ assigned_category
+)
+
+emm_task_confidence
+
+pairs_task_confidence <- pairs(
+  emm_task_confidence,
+  adjust = "tukey"
+)
+
+pairs_task_confidence
+```
+
+**Assigned task category significantly predicted confidence, F(5, 221) = 5.54, p \< .001.** Confidence was highest for decisions (M = 6.14) and writing (M = 5.86), and lowest for learning (M = 4.79). Tukey-adjusted comparisons showed significantly higher confidence for decisions than info (p = .014) and learning (p \< .001), and higher confidence for writing than learning (p = .003).
+
+**Altogether:** Task category mattered most for uptake and confidence. **Among AI users, creative and writing tasks produced much higher AI similarity than decisions and learning tasks, F(5, 152) = 6.08, p \< .001.** Task category did not significantly predict whether participants opened AI or whether they reported primarily own-thinking ownership, but it did significantly predict confidence, F(5, 221) = 5.54, p \< .001.
+
+## Read Intent Codes
+
+```{r}
+intent_path <- "survey_responses_with_ai_intent_codes.csv"
+
+intent_raw <- read.csv(
+  intent_path,
+  stringsAsFactors = FALSE,
+  na.strings = c("", "NA"),
+  fileEncoding = "UTF-8"
+)
+
+intent <- intent_raw
+```
+
+## Analysis 4: Asking/Doing/Expressing Intent Coding
+
+This analysis uses the coded `question_for_ai` text, following the ChatGPT paper's Appendix A.2 Asking/Doing/Expressing scheme.
+
+-   **Asking**: seeking information or advice to be better informed or make a decision
+-   **Doing**: requesting that the AI perform a task or produce an output
+-   **Expressing**: neither asking for information/advice nor requesting a task
+
+This analysis only includes participants who used the AI assistant and had a non-missing `ai_intent_code`. Participants who did not type a prompt are not assigned an intent code because there is no message to classify. Intent codes were assigned by a language model; human validation is a planned next step.
+
+```{r intent-code-setup}
+intent$ai_used <- tolower(intent$ai_used) == "true"
+intent$jaccard_similarity_to_ai <- suppressWarnings(
+  as.numeric(intent$jaccard_similarity_to_ai)
+)
+intent$epistemic_ownership <- suppressWarnings(
+  as.numeric(intent$epistemic_ownership)
+)
+intent$task_id <- factor(intent$task_id)
+
+intent$ai_intent_code <- factor(
+  intent$ai_intent_code,
+  levels = c("Asking", "Doing", "Expressing")
+)
+
+emm_options(lmer.df = "satterthwaite")
+
+# Binary ownership and reading depth recodes (mirrors model-setup chunk).
+intent$epistemic_ownership_binary <- ifelse(
+  intent$epistemic_ownership <= 3, 0L,
+  ifelse(intent$epistemic_ownership >= 5, 1L, NA_integer_)
+)
+intent$read_carefully <- as.integer(
+  intent$ai_reading_depth == "read_carefully"
+)
+
+intent_model_data <- subset(
+  intent,
+  ai_used == TRUE &
+    !is.na(ai_intent_code) &
+    !is.na(task_id)
+)
+
+intent_similarity_data <- subset(
+  intent_model_data,
+  !is.na(jaccard_similarity_to_ai)
+)
+
+table(intent_model_data$ai_intent_code, useNA = "ifany")
+table(intent_model_data$task_id, intent_model_data$ai_intent_code)
+```
+
+### Analysis 4A: Does AI Intent Predict Similarity To The AI Response?
+
+Outcome: `jaccard_similarity_to_ai`\
+Model type: linear mixed regression\
+Predictor: `ai_intent_code`\
+Random intercept: `task_id`\
+Sample: AI users with a coded `question_for_ai`
+
+This model asks whether people who used the AI for Asking, Doing, or Expressing differed in how similar their final response was to the pre-written AI response.
+
+```{r intent-code-similarity}
+model_intent_similarity <- lmer(
+  jaccard_similarity_to_ai ~ ai_intent_code + (1 | task_id),
+  data = intent_similarity_data
+)
+
+summary(model_intent_similarity)
+isSingular(model_intent_similarity)
+
+tests_intent_similarity <- anova(model_intent_similarity)
+
+tests_intent_similarity
+
+emm_intent_similarity <- emmeans(
+  model_intent_similarity,
+  ~ ai_intent_code
+)
+
+emm_intent_similarity
+
+pairs_intent_similarity <- pairs(
+  emm_intent_similarity,
+  adjust = "tukey"
+)
+
+pairs_intent_similarity
+```
+
+**AI intent significantly predicted Jaccard similarity to the AI response, F(2, 129) = 38.01, p < .001.** Doing prompts produced much higher similarity (M = .713) than Asking prompts (M = .148); Tukey-adjusted Asking - Doing = -0.564, p < .001. Expressing was descriptively intermediate (M = .389), but did not differ significantly from Asking (p = .244) or Doing (p = .066).
+
+### Analysis 4B: Does AI Intent Predict Epistemic Ownership?
+
+Outcome: `epistemic_ownership_binary` (0 = AI's thinking, 1 = own thinking)\
+Model type: mixed logistic regression\
+Predictor: `ai_intent_code`\
+Random intercept: `task_id`\
+Sample: AI users with a coded `question_for_ai`
+
+This model asks whether people who used the AI for Asking, Doing, or Expressing differed in how much AI influence they reported in their final answer. Epistemic ownership is recoded as binary (see Model 3).
+
+```{r intent-code-ownership}
+# Exclude Expressing (n <= 3) -- too sparse for stable binary logistic regression.
+intent_ownership_data <- subset(
+  intent_model_data,
+  !is.na(epistemic_ownership_binary) &
+    ai_intent_code %in% c("Asking", "Doing")
+)
+intent_ownership_data$ai_intent_code <- droplevels(intent_ownership_data$ai_intent_code)
+
+model_intent_ownership <- glmer(
+  epistemic_ownership_binary ~ ai_intent_code + (1 | task_id),
+  data = intent_ownership_data,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_intent_ownership)
+isSingular(model_intent_ownership)
+
+tests_intent_ownership <- drop1(model_intent_ownership, test = "Chisq")
+
+tests_intent_ownership
+
+emm_intent_ownership <- emmeans(
+  model_intent_ownership,
+  ~ ai_intent_code,
+  type = "response"
+)
+
+emm_intent_ownership
+
+pairs_intent_ownership <- pairs(
+  emm_intent_ownership,
+  adjust = "tukey"
+)
+
+summary(pairs_intent_ownership, type = "response")
+```
+
+The Expressing group (n \<= 3) is excluded because it is too sparse for stable binary logistic regression. The Asking vs. Doing comparison showed no significant difference in epistemic ownership.
+
+**Altogether:** Intent coding showed a clear effect for similarity -- Doing prompts led to more AI-like final responses than Asking prompts (Jaccard difference = 0.564, p < .001). Evidence for differences in binary epistemic ownership was not significant, chi-squared(1) = 2.39, p = .122.
+
+## Analysis 5: AI Reading Depth
+
+This analysis asks whether how carefully participants read the AI response predicted textual similarity and epistemic ownership.
+
+Because 57% of AI users reported reading the AI response carefully (`read_carefully`), the ordered 4-level scale collapses to a binary: `read_carefully` (1) vs. anything less (0). This avoids treating ordinal levels with very few observations as evenly spaced.
+
+Outcome: `jaccard_similarity_to_ai`, `epistemic_ownership_binary`\
+Model type: linear/logistic mixed regression\
+Predictor: `read_carefully` (binary)\
+Random intercept: `task_id`\
+Sample: AI users with a valid `ai_reading_depth`
+
+```{r reading-depth-setup}
+reading_depth_data <- subset(
+  model_data,
+  ai_used == TRUE & !is.na(ai_reading_depth) & !is.na(task_id)
+)
+
+# read_carefully inherited from model_data
+table(reading_depth_data$ai_reading_depth, useNA = "ifany")
+table(reading_depth_data$read_carefully, useNA = "ifany")
+```
+
+```{r reading-depth-similarity}
+model_reading_similarity <- lmer(
+  jaccard_similarity_to_ai ~ read_carefully + (1 | task_id),
+  data = subset(reading_depth_data, !is.na(jaccard_similarity_to_ai))
+)
+
+summary(model_reading_similarity)
+fixed_effects_table(model_reading_similarity)
+```
+
+```{r reading-depth-ownership}
+model_reading_ownership <- glmer(
+  epistemic_ownership_binary ~ read_carefully + (1 | task_id),
+  data = subset(reading_depth_data, !is.na(epistemic_ownership_binary)),
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_reading_ownership)
+fixed_effects_table(model_reading_ownership, exponentiate = TRUE)
+```
+
+**Reading carefully significantly predicted lower Jaccard similarity, b = -0.191, p = .0038**, but did not significantly predict binary epistemic ownership, OR = 1.61, p = .192. Among AI users, 57% reported reading the response carefully, 28% skimmed it, and the remaining 15% glanced or did not read it. The negative similarity result suggests that careful readers may have edited or paraphrased more rather than copying verbatim.
+
+```{r reading-depth-jaccard-density, fig.width=8, fig.height=4.5}
+# Distribution of Jaccard similarity: read_carefully vs. everyone else
+density_data <- subset(
+  reading_depth_data,
+  !is.na(jaccard_similarity_to_ai)
+)
+density_data$reading_group <- factor(
+  ifelse(density_data$read_carefully == 1, "Read carefully", "Skimmed / glanced / didn't read"),
+  levels = c("Read carefully", "Skimmed / glanced / didn't read")
+)
+
+group_means <- aggregate(
+  jaccard_similarity_to_ai ~ reading_group,
+  data = density_data,
+  FUN = mean, na.rm = TRUE
+)
+group_ns <- table(density_data$reading_group)
+group_means$n <- as.integer(group_ns[as.character(group_means$reading_group)])
+group_means$label <- sprintf(
+  "%s: mean = %.2f (n = %d)",
+  group_means$reading_group, group_means$jaccard_similarity_to_ai, group_means$n
+)
+
+ggplot(density_data, aes(x = jaccard_similarity_to_ai, fill = reading_group)) +
+  geom_density(alpha = 0.45, color = NA, bw = 0.08) +
+  geom_vline(
+    data = group_means,
+    aes(xintercept = jaccard_similarity_to_ai, color = reading_group),
+    linetype = "dashed", linewidth = 0.9, show.legend = FALSE
+  ) +
+  scale_fill_manual(values = c("Read carefully" = "#4472C4",
+                               "Skimmed / glanced / didn't read" = "#C00000")) +
+  scale_color_manual(values = c("Read carefully" = "#4472C4",
+                                "Skimmed / glanced / didn't read" = "#C00000")) +
+  scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+  labs(
+    title    = "Distribution of Similarity to AI by Reading Depth",
+    subtitle = paste0(
+      group_means$label[group_means$reading_group == "Read carefully"], "  |  ",
+      group_means$label[group_means$reading_group == "Skimmed / glanced / didn't read"]
+    ),
+    x    = "Jaccard Similarity to AI Response",
+    y    = "Density",
+    fill = NULL
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    plot.title    = element_text(face = "bold", size = 12),
+    plot.subtitle = element_text(size = 9.5),
+    legend.position = "bottom"
+  )
+```
+
+## Create Local Embedding Cosine Similarity Dataset
+
+This section creates a new dataset in R called `embedding_similarity_data`.
+
+The goal is to measure semantic similarity between each participant's final response and the AI response they were shown. This is different from `jaccard_similarity_to_ai`, which mostly captures exact word overlap. Embedding cosine similarity is better for shared meaning, including synonyms or paraphrased ideas.
+
+Here, we use a free local embedding model `sentence-transformers/all-MiniLM-L6-v2.` Embedding size: 384 dimensions, not 3072 like the OpenAI model.
+
+```{r install-local-embedding-package, eval=FALSE}
+library(reticulate)
+
+use_virtualenv("r-reticulate-py312", required = TRUE)
+
+py_config()
+
+torch <- import("torch")
+sentence_transformers <- import("sentence_transformers")
+```
+
+### Compute Embedding Cosine Similarity
+
+```{r compute-local-embedding-cosine-similarity}
+library(reticulate)
+use_virtualenv("r-reticulate-py312", required = TRUE)
+py_config()
+
+sentence_transformers <- tryCatch(
+  import("sentence_transformers", delay_load = FALSE),
+  error = function(e) {
+    python_config <- paste(capture.output(py_config()), collapse = "\n")
+    stop(
+      "R could not import the Python module 'sentence_transformers'.\n\n",
+      "Python configuration being used by reticulate:\n",
+      python_config,
+      "\n\nOriginal Python import error:\n",
+      conditionMessage(e),
+      "\n\nTry restarting R, running the one-time setup chunk, ",
+      "and then running this chunk again.",
+      call. = FALSE
+    )
+  }
+)
+
+embedding_model_name <- "sentence-transformers/all-MiniLM-L6-v2"
+embedding_model <- sentence_transformers$SentenceTransformer(
+  embedding_model_name
+)
+
+embedding_similarity_data <- intent
+
+embedding_similarity_data$embedding_cosine_similarity_to_ai <- NA_real_
+embedding_similarity_data$embedding_model_name <- embedding_model_name
+
+embedding_rows <- which(
+  embedding_similarity_data$ai_used == TRUE &
+    !is.na(embedding_similarity_data$participant_response) &
+    !is.na(embedding_similarity_data$ai_response_shown) &
+    trimws(embedding_similarity_data$participant_response) != "" &
+    trimws(embedding_similarity_data$ai_response_shown) != ""
+)
+
+participant_texts <- as.character(
+  embedding_similarity_data$participant_response[embedding_rows]
+)
+
+ai_texts <- as.character(
+  embedding_similarity_data$ai_response_shown[embedding_rows]
+)
+
+texts_to_embed <- c(participant_texts, ai_texts)
+
+# normalize_embeddings = TRUE makes cosine similarity equal to the dot product.
+embeddings <- embedding_model$encode(
+  texts_to_embed,
+  convert_to_numpy = TRUE,
+  normalize_embeddings = TRUE,
+  show_progress_bar = TRUE
+)
+
+embeddings <- py_to_r(embeddings)
+
+n_pairs <- length(embedding_rows)
+
+participant_embeddings <- embeddings[seq_len(n_pairs), , drop = FALSE]
+ai_embeddings <- embeddings[n_pairs + seq_len(n_pairs), , drop = FALSE]
+
+embedding_cosine_similarity <- rowSums(
+  participant_embeddings * ai_embeddings
+)
+
+embedding_similarity_data$embedding_cosine_similarity_to_ai[
+  embedding_rows
+] <- embedding_cosine_similarity
+
+summary(embedding_similarity_data$embedding_cosine_similarity_to_ai)
+```
+
+## Embedding Similarity Robustness Checks
+
+Because Jaccard similarity and embedding cosine similarity were strongly correlated, the embedding measure is best used as a robustness check and semantic extension. These models ask whether the main findings still hold when similarity means shared meaning rather than exact word overlap.
+
+```{r embedding-robustness-setup}
+embedding_analysis_data <- subset(
+  embedding_similarity_data,
+  ai_used == TRUE &
+    !is.na(embedding_cosine_similarity_to_ai) &
+    !is.na(task_id)
+)
+
+embedding_analysis_data$task_id <- factor(embedding_analysis_data$task_id)
+
+embedding_analysis_data$ai_intent_code <- factor(
+  embedding_analysis_data$ai_intent_code,
+  levels = c("Asking", "Doing", "Expressing")
+)
+
+embedding_analysis_data$ai_kind_choice <- factor(
+  embedding_analysis_data$ai_kind_choice
+)
+
+embedding_analysis_data$assigned_category <- factor(
+  embedding_analysis_data$assigned_category
+)
+
+embedding_analysis_data$z_user_decides <- z(
+  embedding_analysis_data$exp_ai_does_work_vs_user_decides
+)
+embedding_analysis_data$z_independent <- z(
+  -embedding_analysis_data$exp_independent_vs_reliant
+)
+
+embedding_analysis_data$z_hours_per_week <- z(
+  embedding_analysis_data$hours_per_week
+)
+
+embedding_analysis_data$z_instrument_vs_point_of_view <- z(
+  embedding_analysis_data$exp_instrument_vs_point_of_view
+)
+
+embedding_analysis_data$z_existing_info_vs_creating_new <- z(
+  embedding_analysis_data$exp_existing_info_vs_creating_new
+)
+
+embedding_analysis_data$z_embedding_cosine_similarity_to_ai <- z(
+  embedding_analysis_data$embedding_cosine_similarity_to_ai
+)
+table(embedding_analysis_data$ai_intent_code, useNA = "ifany")
+summary(embedding_analysis_data$embedding_cosine_similarity_to_ai)
+```
+
+### Embedding Robustness 1: Jaccard vs. Embedding Similarity
+
+```{r embedding-jaccard-correlation}
+similarity_check_data <- subset(
+  embedding_analysis_data,
+  !is.na(jaccard_similarity_to_ai) &
+    !is.na(embedding_cosine_similarity_to_ai)
+)
+
+embedding_jaccard_correlation <- cor(
+  similarity_check_data$jaccard_similarity_to_ai,
+  similarity_check_data$embedding_cosine_similarity_to_ai,
+  use = "complete.obs"
+)
+
+embedding_jaccard_correlation
+
+plot(
+  similarity_check_data$jaccard_similarity_to_ai,
+  similarity_check_data$embedding_cosine_similarity_to_ai,
+  xlab = "Jaccard similarity to AI",
+  ylab = "Embedding cosine similarity to AI",
+  main = "Lexical vs. semantic similarity"
+)
+```
+
+**Jaccard similarity to the AI response was strongly positively associated with embedding cosine similarity to the AI response, Pearson r = .83.** This suggests that the lexical overlap measure captured meaningful semantic convergence with the AI response, not only exact-word copying.
+
+### Embedding Robustness 2: Does AI Intent Predict Semantic Similarity?
+
+Outcome: `embedding_cosine_similarity_to_ai`\
+Model type: linear mixed regression\
+Predictor: `ai_intent_code`\
+Random intercept: `task_id`\
+Sample: AI users with embedding similarity scores
+
+This is the semantic version of Analysis 4A. It asks whether Doing prompts led to responses that were closer in meaning to the AI response, not just closer in wording.
+
+```{r embedding-intent-model}
+embedding_intent_data <- subset(
+  embedding_analysis_data,
+  !is.na(ai_intent_code)
+)
+
+model_embedding_intent <- lmer(
+  embedding_cosine_similarity_to_ai ~ ai_intent_code + (1 | task_id),
+  data = embedding_intent_data
+)
+
+summary(model_embedding_intent)
+isSingular(model_embedding_intent)
+
+tests_embedding_intent <- anova(model_embedding_intent)
+
+tests_embedding_intent
+
+emm_embedding_intent <- emmeans(
+  model_embedding_intent,
+  ~ ai_intent_code
+)
+
+emm_embedding_intent
+
+pairs_embedding_intent <- pairs(
+  emm_embedding_intent,
+  adjust = "tukey"
+)
+
+pairs_embedding_intent
+```
+
+**AI intent significantly predicted embedding-based semantic similarity to the AI response, F(2, 128.05) = 27.01, p < .001.** Doing prompts were more semantically similar to the AI response (M = .884) than Asking prompts (M = .595), Tukey-adjusted Asking - Doing = -0.289, p < .001. Doing was also higher than Expressing (M = .619), Doing - Expressing = 0.266, p = .009, while Asking and Expressing did not differ (p = .966).
+
+### Embedding Robustness 3: Do Pre-Task Independence Beliefs Predict Semantic Similarity?
+
+Outcome: `embedding_cosine_similarity_to_ai`\
+Model type: linear mixed regression\
+Predictors: `z_user_decides`, `z_independent`\
+Random intercept: `task_id`\
+Sample: AI users with embedding similarity scores
+
+This is the semantic version of the earlier stated-independence similarity model. It asks whether participants who described themselves as more independent on either slider produced responses that were less semantically similar to the AI response.
+
+```{r embedding-independence-model}
+model_embedding_independence <- lmer(
+  embedding_cosine_similarity_to_ai ~ z_user_decides +
+    z_independent +
+    z_hours_per_week +
+    z_instrument_vs_point_of_view +
+    (1 | task_id),
+  data = embedding_analysis_data
+)
+
+summary(model_embedding_independence)
+isSingular(model_embedding_independence)
+
+fixed_effects_table(model_embedding_independence)
+```
+
+Neither independence predictor significantly predicted embedding-based semantic similarity to the AI response: `z_user_decides`, b = -0.028, p = .170; `z_independent`, b = -0.008, p = .701. Hours per week (b = 0.005, p = .790) and instrument-vs-point-of-view beliefs (b = 0.008, p = .684) were also not significant. Participants who described themselves as more independent did not reliably produce responses that were less semantically similar to the AI response.
+
+### Embedding Robustness 4: Does AI Conceptualization Predict Semantic Similarity?
+
+Outcome: `embedding_cosine_similarity_to_ai`\
+Model type: linear mixed regression\
+Predictor: `ai_kind_choice`\
+Random intercept: `task_id`\
+Sample: AI users with embedding similarity scores, excluding `Writing or print` because that group had only 3 participants overall
+
+This is the semantic version of Analysis 1B. It asks whether people's conceptualization of AI predicted meaning-level convergence with the AI response.
+
+```{r embedding-ai-kind-similarity}
+embedding_concept_data <- subset(
+  embedding_analysis_data,
+  !is.na(ai_kind_choice) & ai_kind_choice != "Writing or print"
+)
+
+embedding_concept_data$ai_kind_choice <- droplevels(
+  embedding_concept_data$ai_kind_choice
+)
+
+contrasts(embedding_concept_data$ai_kind_choice) <- contr.sum(
+  nlevels(embedding_concept_data$ai_kind_choice)
+)
+
+model_embedding_ai_kind_similarity <- lmer(
+  embedding_cosine_similarity_to_ai ~ ai_kind_choice + (1 | task_id),
+  data = embedding_concept_data
+)
+
+summary(model_embedding_ai_kind_similarity)
+anova(model_embedding_ai_kind_similarity)
+
+emm_embedding_ai_kind_similarity <- emmeans(
+  model_embedding_ai_kind_similarity,
+  ~ ai_kind_choice
+)
+
+emm_embedding_ai_kind_similarity
+
+pairs_embedding_ai_kind_similarity <- pairs(
+  emm_embedding_ai_kind_similarity,
+  adjust = "tukey"
+)
+
+pairs_embedding_ai_kind_similarity
+```
+
+AI conceptualization did not significantly predict semantic similarity to the AI response, F(3, 144.24) = 0.26, p = .857. Tukey-adjusted pairwise comparisons showed no significant differences between conceptualization groups, all p >= .826, consistent with the Jaccard-based result in Analysis 1B.
+
+### Embedding Robustness 5: Do Learning-Curve Variables Predict Semantic Similarity?
+
+Outcome: `embedding_cosine_similarity_to_ai`\
+Model type: linear mixed regression\
+Predictors: `ai_use_tenure`, `z_hours_per_week`, `ai_understanding`\
+Random intercept: `task_id`\
+Sample: AI users with embedding similarity scores
+
+This is the semantic version of Analysis 2B. It asks whether more experienced participants produced responses that were closer in meaning to the AI response.
+
+```{r embedding-learning-curve-similarity}
+embedding_learning_data <- subset(
+  embedding_analysis_data,
+  !is.na(ai_use_tenure) &
+    !is.na(z_hours_per_week) &
+    !is.na(ai_understanding)
+)
+
+model_embedding_learning_similarity <- lmer(
+  embedding_cosine_similarity_to_ai ~ ai_use_tenure +
+    z_hours_per_week +
+    ai_understanding +
+    (1 | task_id),
+  data = embedding_learning_data
+)
+
+summary(model_embedding_learning_similarity)
+anova(model_embedding_learning_similarity)
+
+emm_embedding_learning_tenure <- emmeans(
+  model_embedding_learning_similarity,
+  ~ ai_use_tenure
+)
+
+emm_embedding_learning_tenure
+```
+
+AI-use tenure, F(4, 141.87) = 0.75, p = .557, hours per week, F(1, 141.38) = 0.07, p = .790, and AI understanding, F(3, 140.40) = 0.35, p = .791, did not significantly predict embedding-based semantic similarity to the AI response. This pattern is consistent with the Jaccard-based result in Analysis 2B.
+
+### Embedding Robustness 6: Does Task Category Predict Semantic Similarity?
+
+Outcome: `embedding_cosine_similarity_to_ai`\
+Model type: linear regression\
+Predictor: `assigned_category`\
+Sample: AI users with embedding similarity scores
+
+This is the semantic version of Analysis 3B. It uses fixed effects for task category, matching the task-category analysis above.
+
+```{r embedding-task-category-similarity}
+embedding_task_category_data <- subset(
+  embedding_analysis_data,
+  assigned_category %in% task_categories &
+    !is.na(embedding_cosine_similarity_to_ai)
+)
+
+embedding_task_category_data$assigned_category <- factor(
+  embedding_task_category_data$assigned_category,
+  levels = task_categories
+)
+
+continuous_category_summary(
+  embedding_task_category_data,
+  "embedding_cosine_similarity_to_ai"
+)
+
+model_embedding_task_category_similarity <- lm(
+  embedding_cosine_similarity_to_ai ~ assigned_category,
+  data = embedding_task_category_data
+)
+
+summary(model_embedding_task_category_similarity)
+anova(model_embedding_task_category_similarity)
+
+emm_embedding_task_category_similarity <- emmeans(
+  model_embedding_task_category_similarity,
+  ~ assigned_category
+)
+
+emm_embedding_task_category_similarity
+
+pairs_embedding_task_category_similarity <- pairs(
+  emm_embedding_task_category_similarity,
+  adjust = "tukey"
+)
+
+pairs_embedding_task_category_similarity
+```
+
+**Task category significantly predicted embedding-based semantic similarity, F(5, 151) = 4.39, p < .001.** Writing tasks had the highest estimated semantic similarity (M = .884) and decisions tasks had the lowest (M = .602). Tukey-adjusted pairwise comparisons showed that decisions were significantly lower than creative tasks (difference = -0.246, p = .0066), learning tasks (difference = -0.208, p = .013), and writing tasks (difference = -0.281, p < .001).
+
+### Embedding Robustness 7: Does Reading Depth Predict Semantic Similarity?
+
+Outcome: `embedding_cosine_similarity_to_ai`\
+Model type: linear mixed regression\
+Predictor: `read_carefully` (binary)\
+Random intercept: `task_id`\
+Sample: AI users with embedding similarity scores and a valid `ai_reading_depth`
+
+This is the semantic version of the reading-depth similarity model in Analysis 5.
+
+```{r embedding-reading-depth-similarity}
+embedding_reading_depth_data <- subset(
+  embedding_analysis_data,
+  !is.na(ai_reading_depth)
+)
+
+embedding_reading_depth_data$read_carefully <- as.integer(
+  embedding_reading_depth_data$ai_reading_depth == "read_carefully"
+)
+
+model_embedding_reading_similarity <- lmer(
+  embedding_cosine_similarity_to_ai ~ read_carefully + (1 | task_id),
+  data = embedding_reading_depth_data
+)
+
+summary(model_embedding_reading_similarity)
+fixed_effects_table(model_embedding_reading_similarity)
+```
+
+**Reading carefully significantly predicted lower embedding-based semantic similarity, b = -0.089, p = .023.** This is consistent with Analysis 5: careful readers showed lower lexical and semantic similarity, suggesting more selective editing or paraphrasing rather than direct copying.
+
+### Cases Where Lexical And Semantic Similarity Diverge
+
+This table helps identify cases where participants did not share many exact words with the AI response but still had high semantic similarity.
+
+```{r embedding-divergence-check}
+embedding_analysis_data$jaccard_z <- z(
+  embedding_analysis_data$jaccard_similarity_to_ai
+)
+
+embedding_analysis_data$embedding_similarity_z <- z(
+  embedding_analysis_data$embedding_cosine_similarity_to_ai
+)
+
+embedding_analysis_data$semantic_minus_lexical <-
+  embedding_analysis_data$embedding_similarity_z -
+  embedding_analysis_data$jaccard_z
+
+embedding_divergence_cases <- embedding_analysis_data[
+  order(-embedding_analysis_data$semantic_minus_lexical),
+  c(
+    "submission_id",
+    "assigned_category",
+    "ai_intent_code",
+    "jaccard_similarity_to_ai",
+    "embedding_cosine_similarity_to_ai",
+    "semantic_minus_lexical",
+    "participant_response",
+    "ai_response_shown"
+  )
+]
+
+embedding_divergence_cases
+summary(embedding_divergence_cases)
+```
+
+High positive cases mean relatively high semantic similarity but lower lexical overlap so possible paraphrasing / same ideas in different words.
+
+High negative cases mean relatively high lexical overlap but lower semantic similarity so possible shared keywords, copied phrases, or task-specific vocabulary without the whole response being as semantically close.
+
+```{r semantic-minus-lexical-histogram}
+hist(
+  embedding_analysis_data$semantic_minus_lexical,
+  breaks = 15,
+  xlab = "Semantic minus lexical similarity",
+  main = "Distribution of semantic-lexical divergence"
+)
+```
+
+The divergence distribution was centered slightly below zero, suggesting that lexical and semantic similarity generally aligned, with a small tendency for lexical overlap to be relatively stronger. However, there were more moderately positive divergence cases than strongly negative ones, indicating several responses that were semantically close to the AI response despite lower exact word overlap.
+
+```{r}
+boxplot(
+  semantic_minus_lexical ~ ai_intent_code,
+  data = embedding_analysis_data,
+  xlab = "AI intent code",
+  ylab = "Semantic minus lexical similarity",
+  main = "Divergence by AI intent"
+)
+```
+
+Asking has the highest and most variable semantic_minus_lexical values. Many Asking cases are positive or near positive, meaning people who asked for information/advice may have taken up the AI's ideas while using their own wording. Doing is centered lower, around negative values. That suggests Doing prompts tended to produce responses where lexical overlap was relatively strong compared with semantic-only divergence.
+
+```{r}
+par(mfrow = c(1, 2))
+
+plot(
+  embedding_analysis_data$z_user_decides,
+  embedding_analysis_data$semantic_minus_lexical,
+  xlab = "z_user_decides",
+  ylab = "Semantic minus lexical similarity",
+  main = "Divergence by z_user_decides"
+)
+abline(
+  lm(
+    semantic_minus_lexical ~ z_user_decides,
+    data = embedding_analysis_data
+  ),
+  col = "red",
+  lwd = 2
+)
+
+plot(
+  embedding_analysis_data$z_independent,
+  embedding_analysis_data$semantic_minus_lexical,
+  xlab = "z_independent",
+  ylab = "Semantic minus lexical similarity",
+  main = "Divergence by z_independent"
+)
+abline(
+  lm(
+    semantic_minus_lexical ~ z_independent,
+    data = embedding_analysis_data
+  ),
+  col = "blue",
+  lwd = 2
+)
+
+par(mfrow = c(1, 1))
+
+summary(lm(
+  semantic_minus_lexical ~ z_user_decides + z_independent,
+  data = embedding_analysis_data
+))
+```
+
+Neither independence predictor significantly predicted semantic-lexical divergence. Participants who described themselves as more independent on either slider were not more likely to show idea-level uptake without word-level overlap.
+
+**Altogether:** Embedding similarity analyses suggest that participants' overlap with the AI response also reflected meaningful semantic convergence besides shared words. Asking prompts appear to involve using AI as an informational or advisory resource, where participants may incorporate AI-generated ideas while still rephrasing or integrating them into their own response. Doing prompts, by contrast, more directly delegate the task of producing the response to the AI. This was reflected in higher lexical and semantic similarity to the AI response among Doing prompts, suggesting a stronger form of cognitive offloading. However, neither pre-task independence predictor reliably predicted lower semantic uptake or greater paraphrasing. Actual prompting behavior predicted AI uptake more clearly than prior independence beliefs.
+
+## Exploratory Clustering: AI Use Profiles
+
+This exploratory analysis asks whether participants fall into AI-use profiles based on how often they use AI for different purposes. Because the eight frequency items are on the same 1-7 scale but may vary in spread, I standardize them before clustering. The cluster profiles are then described using the original 1-7 means so they remain interpretable.
+
+```{r exploratory-clustering-ai-use-profiles}
+cluster_frequency_items <- c(
+  "freq_information_guidance",
+  "freq_writing_communication",
+  "freq_coding_math_technical",
+  "freq_creative_work",
+  "freq_learning_understanding",
+  "freq_advice_decisions",
+  "freq_summarizing_opinions",
+  "freq_automation_repetitive"
+)
+
+cluster_data <- embedding_similarity_data
+
+for (item in cluster_frequency_items) {
+  cluster_data[[item]] <- suppressWarnings(as.numeric(cluster_data[[item]]))
+}
+
+cluster_complete_data <- cluster_data[
+  complete.cases(cluster_data[, cluster_frequency_items]),
+]
+
+cluster_matrix <- scale(cluster_complete_data[, cluster_frequency_items])
+
+set.seed(123)
+
+cluster_fit_table <- data.frame()
+cluster_models <- list()
+
+for (k in 2:4) {
+  fit <- kmeans(
+    cluster_matrix,
+    centers = k,
+    nstart = 50
+  )
+
+  cluster_models[[as.character(k)]] <- fit
+
+  cluster_fit_table <- rbind(
+    cluster_fit_table,
+    data.frame(
+      n_clusters = k,
+      total_withinss = fit$tot.withinss,
+      between_total_ratio = fit$betweenss / fit$totss
+    )
+  )
+}
+
+cluster_fit_table
+
+plot(
+  cluster_fit_table$n_clusters,
+  cluster_fit_table$total_withinss,
+  type = "b",
+  xlab = "Number of clusters",
+  ylab = "Total within-cluster sum of squares",
+  main = "Elbow plot for AI-use frequency clusters"
+)
+
+# Choose the number of clusters after inspecting the elbow plot and profiles.
+# Three clusters is the default because it is interpretable and comparable to
+# the earlier exploratory LCA result.
+best_n_clusters <- 3
+best_cluster_model <- cluster_models[[as.character(best_n_clusters)]]
+
+cluster_complete_data$ai_use_cluster <- factor(
+  best_cluster_model$cluster
+)
+
+table(cluster_complete_data$ai_use_cluster)
+
+cluster_profiles <- aggregate(
+  cluster_complete_data[, cluster_frequency_items],
+  by = list(ai_use_cluster = cluster_complete_data$ai_use_cluster),
+  FUN = mean,
+  na.rm = TRUE
+)
+
+cluster_profiles
+```
+
+The elbow plot suggested that a 3-cluster solution provided a reasonable balance between fit and interpretability. It explained approximately 47% of the variation in AI-use frequency patterns.
+
+The clusters reflected distinct AI-use profiles.
+
+Cluster 1: Low-frequency AI users, with relatively low use across all purposes.
+
+Cluster 2: Broad high-frequency AI users, with high use across information, writing, coding, creative work, learning, advice, summarizing, and automation.
+
+Cluster 3: Information/learning/advice users, with relatively high use for information, learning, advice, and summarizing, but lower use for coding, creative work, and automation.
+
+```{r cluster-predict-outcomes}
+model_cluster_ai_used <- glm(
+  ai_used ~ ai_use_cluster,
+  data = cluster_complete_data,
+  family = binomial
+)
+
+summary(model_cluster_ai_used)
+drop1(model_cluster_ai_used, test = "Chisq")
+emmeans(model_cluster_ai_used, ~ ai_use_cluster, type = "response")
+
+cluster_ai_users <- subset(
+  cluster_complete_data,
+  ai_used == TRUE & !is.na(task_id)
+)
+
+cluster_ai_users$task_id <- factor(cluster_ai_users$task_id)
+
+model_cluster_jaccard <- lmer(
+  jaccard_similarity_to_ai ~ ai_use_cluster + (1 | task_id),
+  data = subset(cluster_ai_users, !is.na(jaccard_similarity_to_ai))
+)
+
+summary(model_cluster_jaccard)
+anova(model_cluster_jaccard)
+emmeans(model_cluster_jaccard, pairwise ~ ai_use_cluster, adjust = "tukey")
+
+model_cluster_embedding <- lmer(
+  embedding_cosine_similarity_to_ai ~ ai_use_cluster + (1 | task_id),
+  data = subset(cluster_ai_users, !is.na(embedding_cosine_similarity_to_ai))
+)
+
+summary(model_cluster_embedding)
+anova(model_cluster_embedding)
+emmeans(model_cluster_embedding, pairwise ~ ai_use_cluster, adjust = "tukey")
+
+cluster_ai_users$epistemic_ownership_binary <- ifelse(
+  cluster_ai_users$epistemic_ownership <= 3, 0L,
+  ifelse(cluster_ai_users$epistemic_ownership >= 5, 1L, NA_integer_)
+)
+
+model_cluster_ownership <- glmer(
+  epistemic_ownership_binary ~ ai_use_cluster + (1 | task_id),
+  data = subset(cluster_ai_users, !is.na(epistemic_ownership_binary)),
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_cluster_ownership)
+drop1(model_cluster_ownership, test = "Chisq")
+emmeans(model_cluster_ownership, pairwise ~ ai_use_cluster, adjust = "tukey", type = "response")
+```
+
+**Cluster membership significantly predicted whether participants used the optional AI assistant, chi-squared(2) = 17.57, p < .001.** Participants in Cluster 1, the low-frequency AI-use group, had an estimated AI-use probability of .45. Participants in Cluster 2, the broad high-frequency AI-use group, had a higher estimated probability of AI use (.77) and were significantly more likely to use AI than Cluster 1, b = 1.41, SE = 0.38, z = 3.70, p < .001. Participants in Cluster 3, the information/learning/advice group, also had a higher estimated probability of AI use (.76) and were significantly more likely to use AI than Cluster 1, b = 1.37, SE = 0.38, z = 3.65, p < .001.
+
+However, among participants who used AI, cluster membership did not significantly predict lexical similarity to the AI response, F(2, 154.06) = 0.47, p = .628. Estimated Jaccard similarity was similar across clusters: Cluster 1, M = .440; Cluster 2, M = .530; Cluster 3, M = .532. Tukey-adjusted pairwise comparisons were all non-significant, all p >= .640.
+
+Cluster membership also did not significantly predict embedding-based semantic similarity to the AI response, F(2, 152.76) = 0.29, p = .748. Estimated semantic similarity was similar across clusters: Cluster 1, M = .744; Cluster 2, M = .779; Cluster 3, M = .791. Tukey-adjusted pairwise comparisons were again non-significant, all p >= .726.
+
+Finally, cluster membership did not significantly predict binary epistemic ownership, chi-squared(2) = 2.43, p = .297. Estimated probabilities of primarily own-thinking ownership were .30 for Cluster 1, .27 for Cluster 2, and .40 for Cluster 3. Tukey-adjusted pairwise comparisons were not significant, all p >= .288.
+
+```{r cluster-visualizations, fig.width=11, fig.height=8}
+# -----------------------------
+# 1. Cluster profile heatmap
+# -----------------------------
+
+cluster_profile_long <- do.call(rbind, lapply(
+  seq_len(nrow(cluster_profiles)),
+  function(i) {
+    data.frame(
+      ai_use_cluster = cluster_profiles$ai_use_cluster[i],
+      frequency_item = cluster_frequency_items,
+      mean_frequency = as.numeric(cluster_profiles[i, cluster_frequency_items]),
+      stringsAsFactors = FALSE
+    )
+  }
+))
+
+cluster_profile_long$frequency_label <- factor(
+  cluster_profile_long$frequency_item,
+  levels = cluster_frequency_items,
+  labels = c(
+    "Info / guidance",
+    "Writing / communication",
+    "Coding / technical",
+    "Creative work",
+    "Learning",
+    "Advice / decisions",
+    "Summarizing",
+    "Automation"
+  )
+)
+
+ggplot(cluster_profile_long, aes(
+  x = frequency_label,
+  y = ai_use_cluster,
+  fill = mean_frequency
+)) +
+  geom_tile(color = "white", linewidth = 0.6) +
+  geom_text(
+    aes(label = sprintf("%.1f", mean_frequency)),
+    size = 3.4,
+    fontface = "bold"
+  ) +
+  scale_fill_gradient(
+    low = "#f2f2f2",
+    high = "#4472C4",
+    limits = c(1, 7)
+  ) +
+  labs(
+    title = "AI Use Frequency Profiles by Cluster",
+    x = NULL,
+    y = "AI use cluster",
+    fill = "Mean\nfrequency"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13),
+    axis.text.x = element_text(angle = 35, hjust = 1)
+  )
+
+
+# -----------------------------
+# 2. PCA visualization of clusters
+# -----------------------------
+
+cluster_pca <- prcomp(cluster_matrix, center = FALSE, scale. = FALSE)
+
+cluster_pca_data <- data.frame(
+  pc1 = cluster_pca$x[, 1],
+  pc2 = cluster_pca$x[, 2],
+  ai_use_cluster = cluster_complete_data$ai_use_cluster
+)
+
+pca_var <- round(100 * summary(cluster_pca)$importance[2, 1:2], 1)
+
+ggplot(cluster_pca_data, aes(
+  x = pc1,
+  y = pc2,
+  color = ai_use_cluster
+)) +
+  geom_point(alpha = 0.75, size = 2.2) +
+  stat_ellipse(linewidth = 0.8, alpha = 0.6) +
+  labs(
+    title = "Participant Clusters Based on AI Use Frequencies",
+    x = paste0("PC1 (", pca_var[1], "% variance)"),
+    y = paste0("PC2 (", pca_var[2], "% variance)"),
+    color = "Cluster"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13)
+  )
+
+
+# -----------------------------
+# 3. Cluster relationships with outcomes
+# -----------------------------
+
+cluster_outcome_summary <- do.call(rbind, lapply(
+  split(cluster_complete_data, cluster_complete_data$ai_use_cluster),
+  function(sub) {
+    data.frame(
+      ai_use_cluster = as.character(sub$ai_use_cluster[1]),
+      ai_use_rate = mean(sub$ai_used, na.rm = TRUE),
+      mean_jaccard = mean(
+        sub$jaccard_similarity_to_ai[sub$ai_used == TRUE],
+        na.rm = TRUE
+      ),
+      mean_embedding = mean(
+        sub$embedding_cosine_similarity_to_ai[sub$ai_used == TRUE],
+        na.rm = TRUE
+      ),
+      mean_epistemic_ownership = mean(
+        sub$epistemic_ownership[sub$ai_used == TRUE],
+        na.rm = TRUE
+      ),
+      n_all = nrow(sub),
+      n_ai_users = sum(sub$ai_used == TRUE, na.rm = TRUE),
+      stringsAsFactors = FALSE
+    )
+  }
+))
+
+cluster_outcome_summary$ai_use_cluster <- factor(
+  cluster_outcome_summary$ai_use_cluster,
+  levels = sort(unique(cluster_outcome_summary$ai_use_cluster))
+)
+
+p_cluster_use <- ggplot(
+  cluster_outcome_summary,
+  aes(x = ai_use_cluster, y = ai_use_rate)
+) +
+  geom_col(fill = "#70AD47", width = 0.6) +
+  geom_text(
+    aes(label = paste0(round(ai_use_rate * 100), "%")),
+    vjust = -0.35, size = 3.5, fontface = "bold"
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n_all), y = 0.05),
+    color = "white", size = 3.1
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1.05),
+    expand = c(0, 0),
+    labels = function(x) paste0(round(x * 100), "%")
+  ) +
+  labs(
+    title = "AI Use Rate",
+    x = "Cluster",
+    y = "% Used AI"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(plot.title = element_text(face = "bold", size = 11))
+
+p_cluster_jaccard <- ggplot(
+  cluster_outcome_summary,
+  aes(x = ai_use_cluster, y = mean_jaccard)
+) +
+  geom_col(fill = "#4472C4", width = 0.6) +
+  geom_text(
+    aes(label = sprintf("%.3f", mean_jaccard)),
+    vjust = -0.35, size = 3.5, fontface = "bold"
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n_ai_users), y = 0.035),
+    color = "white", size = 3.1
+  ) +
+  scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
+  labs(
+    title = "Mean Jaccard Similarity",
+    x = "Cluster",
+    y = "Mean Jaccard"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(plot.title = element_text(face = "bold", size = 11))
+
+p_cluster_embedding <- ggplot(
+  cluster_outcome_summary,
+  aes(x = ai_use_cluster, y = mean_embedding)
+) +
+  geom_col(fill = "#5B9BD5", width = 0.6) +
+  geom_text(
+    aes(label = sprintf("%.3f", mean_embedding)),
+    vjust = -0.35, size = 3.5, fontface = "bold"
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n_ai_users), y = 0.035),
+    color = "white", size = 3.1
+  ) +
+  scale_y_continuous(limits = c(0, 1.1), expand = c(0, 0)) +
+  labs(
+    title = "Mean Embedding Similarity",
+    x = "Cluster",
+    y = "Mean embedding cosine"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(plot.title = element_text(face = "bold", size = 11))
+
+p_cluster_ownership <- ggplot(
+  cluster_outcome_summary,
+  aes(x = ai_use_cluster, y = mean_epistemic_ownership)
+) +
+  geom_col(fill = "#A64D79", width = 0.6) +
+  geom_text(
+    aes(label = sprintf("%.2f", mean_epistemic_ownership)),
+    vjust = -0.35, size = 3.5, fontface = "bold"
+  ) +
+  geom_text(
+    aes(label = paste0("n=", n_ai_users), y = 0.35),
+    color = "white", size = 3.1
+  ) +
+  scale_y_continuous(limits = c(0, 7), expand = c(0, 0)) +
+  labs(
+    title = "Mean Epistemic Ownership",
+    x = "Cluster",
+    y = "Ownership"
+  ) +
+  theme_classic(base_size = 11) +
+  theme(plot.title = element_text(face = "bold", size = 11))
+
+grid.arrange(
+  p_cluster_use,
+  p_cluster_jaccard,
+  p_cluster_embedding,
+  p_cluster_ownership,
+  ncol = 2,
+  top = grid::textGrob(
+    "AI Use Clusters and Behavioral Outcomes",
+    gp = grid::gpar(fontface = "bold", fontsize = 13)
+  )
+)
+```
+
+
+**Altogether:** **Participants' general AI-use profiles predicted whether they chose to consult the AI assistant, chi-squared(2) = 17.57, p < .001**, but not how much they incorporated the AI response once they used it, whether uptake was measured lexically, semantically, or through binary epistemic ownership.
+
+## Analysis 7: Domain-Specific AI Use Frequency vs. Task Behavior
+
+This analysis asks whether self-reported AI use frequency in the specific domain of the assigned task predicts actual AI use and uptake in that task. For example, does someone who says they frequently use AI for writing tasks actually consult AI and copy more in a writing task?
+
+Rather than constructing a category-to-item mapping, this analysis uses `self_reported_freq_in_assigned_category`, which directly records how often each participant reported using AI for the type of task they were assigned. This is a more direct measure and avoids the assumption that a single frequency item maps cleanly to each task category.
+
+```{r domain-freq-setup}
+domain_freq_data <- model_data
+
+domain_freq_data$z_self_reported_freq <- z(
+  domain_freq_data$self_reported_freq_in_assigned_category
+)
+
+summary(domain_freq_data$self_reported_freq_in_assigned_category)
+table(domain_freq_data$assigned_category, useNA = "ifany")
+```
+
+```{r domain-freq-ai-used}
+model_dfreq_ai_used <- glmer(
+  ai_used ~ z_self_reported_freq +
+    z_hours_per_week +
+    (1 | task_id),
+  data = subset(domain_freq_data, !is.na(z_self_reported_freq)),
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_dfreq_ai_used)
+fixed_effects_table(model_dfreq_ai_used, exponentiate = TRUE)
+```
+
+**Self-reported domain-specific AI use frequency significantly predicted whether participants used the AI assistant during the task, OR = 1.82, p \< .001.** A one-standard-deviation increase in reported AI use for the assigned task domain was associated with higher odds of consulting the optional assistant, controlling for hours per week. Hours per week was not significant, OR = 1.14, p = .452.
+
+```{r domain-freq-similarity}
+domain_freq_ai_users <- subset(
+  domain_freq_data,
+  ai_used == TRUE & !is.na(z_self_reported_freq) & !is.na(jaccard_similarity_to_ai)
+)
+
+model_dfreq_similarity <- lmer(
+  jaccard_similarity_to_ai ~ z_self_reported_freq +
+    z_hours_per_week +
+    (1 | task_id),
+  data = domain_freq_ai_users
+)
+
+summary(model_dfreq_similarity)
+fixed_effects_table(model_dfreq_similarity)
+```
+
+Among participants who used the assistant, domain-specific AI use frequency did not predict lexical similarity to the AI response, b = -0.013, p = .757. Hours per week was also not significant, b = 0.011, p = .729. This is an AI-user-only model, so it asks whether domain frequency predicts copying after participants have already chosen to use AI.
+
+```{r domain-freq-embedding}
+# Use self_reported_freq_in_assigned_category on embedding_analysis_data.
+embedding_analysis_data$z_self_reported_freq <- z(
+  embedding_analysis_data$self_reported_freq_in_assigned_category
+)
+
+domain_freq_embedding_data <- subset(
+  embedding_analysis_data,
+  !is.na(z_self_reported_freq) & !is.na(embedding_cosine_similarity_to_ai)
+)
+
+model_dfreq_embedding <- lmer(
+  embedding_cosine_similarity_to_ai ~ z_self_reported_freq +
+    z_hours_per_week +
+    (1 | task_id),
+  data = domain_freq_embedding_data
+)
+
+summary(model_dfreq_embedding)
+fixed_effects_table(model_dfreq_embedding)
+
+domain_freq_embedding_data$z_embedding_cosine_similarity_to_ai <- z(
+  domain_freq_embedding_data$embedding_cosine_similarity_to_ai
+)
+```
+
+Domain-specific AI use frequency also did not predict embedding-based semantic similarity to the AI response among AI users, b = -0.012, p = .554. Hours per week was not significant, b = 0.005, p = .817.
+
+```{r domain-freq-ownership}
+domain_freq_data$epistemic_ownership_binary <- ifelse(
+  domain_freq_data$epistemic_ownership <= 3, 0L,
+  ifelse(domain_freq_data$epistemic_ownership >= 5, 1L, NA_integer_)
+)
+
+domain_freq_ownership_data <- subset(
+  domain_freq_data,
+  ai_used == TRUE & !is.na(z_self_reported_freq) & !is.na(epistemic_ownership_binary)
+)
+
+model_dfreq_ownership <- glmer(
+  epistemic_ownership_binary ~ z_jaccard_similarity_to_ai +
+    z_self_reported_freq +
+    z_hours_per_week +
+    (1 | task_id),
+  data = domain_freq_ownership_data,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_dfreq_ownership)
+fixed_effects_table(model_dfreq_ownership, exponentiate = TRUE)
+```
+
+```{r domain-freq-ownership-embedding-control}
+domain_freq_embedding_data$epistemic_ownership_binary <- ifelse(
+  domain_freq_embedding_data$epistemic_ownership <= 3, 0L,
+  ifelse(domain_freq_embedding_data$epistemic_ownership >= 5, 1L, NA_integer_)
+)
+
+domain_freq_embedding_ownership_data <- subset(
+  domain_freq_embedding_data,
+  !is.na(epistemic_ownership_binary) &
+    !is.na(z_embedding_cosine_similarity_to_ai)
+)
+
+model_dfreq_ownership_embedding <- glmer(
+  epistemic_ownership_binary ~ z_embedding_cosine_similarity_to_ai +
+    z_self_reported_freq +
+    z_hours_per_week +
+    (1 | task_id),
+  data = domain_freq_embedding_ownership_data,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_dfreq_ownership_embedding)
+fixed_effects_table(model_dfreq_ownership_embedding, exponentiate = TRUE)
+```
+
+Domain-specific AI use frequency did not predict binary epistemic ownership whether AI uptake was measured by Jaccard similarity (OR = 1.21, p = .438) or by embedding similarity (OR = 1.11, p = .598). **In both models, similarity to the AI response was the main predictor of lower own-thinking ownership: Jaccard similarity, OR = 0.33, p \< .001; embedding similarity, OR = 0.40, p \< .001.**
+
+## Analysis 8: AI Engagement And Attention
+
+This exploratory analysis asks whether participants who spent more time with the AI response, or reported reading it more carefully, showed greater uptake of the AI response or different epistemic ownership ratings. Because timing variables are usually skewed, millisecond variables are converted to seconds and log-transformed with `log1p()`.
+
+```{r ai-engagement-setup}
+engagement_data <- subset(
+  embedding_similarity_data,
+  ai_used == TRUE & !is.na(task_id)
+)
+
+engagement_data$task_id <- factor(engagement_data$task_id)
+
+engagement_data$ai_reading_depth <- factor(
+  engagement_data$ai_reading_depth,
+  levels = c("not_read", "glanced", "skimmed", "read_carefully"),
+  ordered = TRUE
+)
+
+# Binary recodings.
+engagement_data$epistemic_ownership_binary <- ifelse(
+  engagement_data$epistemic_ownership <= 3, 0L,
+  ifelse(engagement_data$epistemic_ownership >= 5, 1L, NA_integer_)
+)
+engagement_data$read_carefully <- as.integer(
+  engagement_data$ai_reading_depth == "read_carefully"
+)
+
+engagement_data$response_writing_time_ms <-
+  engagement_data$response_submitted_ms - engagement_data$response_started_ms
+
+engagement_data$response_writing_time_ms[
+  engagement_data$response_writing_time_ms < 0
+] <- NA_real_
+
+engagement_data$log_time_before_ai_sec <- log1p(
+  engagement_data$time_before_ai_ms / 1000
+)
+
+engagement_data$log_ai_visible_duration_sec <- log1p(
+  engagement_data$ai_visible_duration_ms / 1000
+)
+
+engagement_data$log_response_writing_time_sec <- log1p(
+  engagement_data$response_writing_time_ms / 1000
+)
+
+engagement_data$log_task_duration_sec <- log1p(
+  engagement_data$task_duration_ms / 1000
+)
+
+engagement_data$z_log_time_before_ai_sec <- z(
+  engagement_data$log_time_before_ai_sec
+)
+
+engagement_data$z_log_ai_visible_duration_sec <- z(
+  engagement_data$log_ai_visible_duration_sec
+)
+
+engagement_data$z_log_response_writing_time_sec <- z(
+  engagement_data$log_response_writing_time_sec
+)
+
+engagement_data$z_log_task_duration_sec <- z(
+  engagement_data$log_task_duration_sec
+)
+
+table(engagement_data$ai_reading_depth, useNA = "ifany")
+summary(engagement_data$ai_visible_duration_ms)
+summary(engagement_data$response_writing_time_ms)
+```
+
+### Analysis 8A: Does Self-Reported Reading Depth Match Viewing Time?
+
+This check asks whether people who reported reading the AI response carefully also had the AI response visible for longer.
+
+```{r ai-engagement-reading-depth-validation}
+model_reading_depth_visible_time <- lmer(
+  log_ai_visible_duration_sec ~ read_carefully +
+    (1 | task_id),
+  data = subset(
+    engagement_data,
+    !is.na(log_ai_visible_duration_sec) & !is.na(read_carefully)
+  )
+)
+
+summary(model_reading_depth_visible_time)
+fixed_effects_table(model_reading_depth_visible_time)
+
+boxplot(
+  log_ai_visible_duration_sec ~ ai_reading_depth,
+  data = engagement_data,
+  xlab = "AI reading depth",
+  ylab = "Log AI visible duration (seconds)",
+  main = "AI visible time by self-reported reading depth"
+)
+```
+
+**People who reported reading carefully had the AI response visible significantly longer than other AI users, b = 0.350, p = .018.** This supports the self-reported reading-depth item as behaviorally meaningful, although it is still an imperfect proxy for attention.
+
+### Analysis 8B: Does Engagement Predict Lexical Similarity?
+
+Outcome: `jaccard_similarity_to_ai`\
+Model type: linear mixed regression\
+Predictors: `ai_reading_depth`, `ai_visible_duration_ms`, `time_before_ai_ms`\
+Random intercept: `task_id`\
+Sample: AI users
+
+```{r ai-engagement-jaccard-similarity}
+engagement_jaccard_data <- subset(
+  engagement_data,
+  !is.na(jaccard_similarity_to_ai) &
+    !is.na(read_carefully) &
+    !is.na(z_log_ai_visible_duration_sec) &
+    !is.na(z_log_time_before_ai_sec)
+)
+
+model_engagement_jaccard <- lmer(
+  jaccard_similarity_to_ai ~ read_carefully +
+    z_log_ai_visible_duration_sec +
+    z_log_time_before_ai_sec +
+    (1 | task_id),
+  data = engagement_jaccard_data
+)
+
+summary(model_engagement_jaccard)
+fixed_effects_table(model_engagement_jaccard)
+```
+
+Reading carefully was marginally associated with lower lexical similarity, b = -0.115, p = .067. **Longer AI visible duration significantly predicted lower Jaccard similarity, b = -0.151, p < .001.** This negative association should be interpreted cautiously: it is likely a reverse-causality or strategy-difference pattern. Participants who copied the AI response verbatim (Jaccard = 1.0, n = 55) had no reason to keep the AI visible, whereas participants who spent longer viewing the response may have selected, edited, or paraphrased more. Time before viewing AI was not significant, b = -0.041, p = .191.
+
+### Analysis 8C: Does Engagement Predict Semantic Similarity?
+
+Outcome: `embedding_cosine_similarity_to_ai`\
+Model type: linear mixed regression\
+Predictors: `ai_reading_depth`, `ai_visible_duration_ms`, `time_before_ai_ms`\
+Random intercept: `task_id`\
+Sample: AI users with embedding similarity scores
+
+```{r ai-engagement-embedding-similarity}
+engagement_embedding_data <- subset(
+  engagement_data,
+  !is.na(embedding_cosine_similarity_to_ai) &
+    !is.na(read_carefully) &
+    !is.na(z_log_ai_visible_duration_sec) &
+    !is.na(z_log_time_before_ai_sec)
+)
+
+model_engagement_embedding <- lmer(
+  embedding_cosine_similarity_to_ai ~ read_carefully +
+    z_log_ai_visible_duration_sec +
+    z_log_time_before_ai_sec +
+    (1 | task_id),
+  data = engagement_embedding_data
+)
+
+summary(model_engagement_embedding)
+fixed_effects_table(model_engagement_embedding)
+```
+
+Reading carefully did not significantly predict semantic similarity, b = -0.047, p = .224. **Longer AI visible duration predicted lower embedding similarity, b = -0.059, p = .0026**, and longer time before viewing AI also predicted lower embedding similarity, b = -0.046, p = .019. These timing effects should be interpreted as strategy differences rather than evidence that engagement itself causally reduces uptake.
+
+### Analysis 8D: Does Engagement Predict Epistemic Ownership?
+
+Outcome: `epistemic_ownership_binary` (0 = AI's thinking, 1 = own thinking)\
+Model type: mixed logistic regression\
+Predictors: `read_carefully`, `z_log_ai_visible_duration_sec`, `z_log_time_before_ai_sec`\
+Random intercept: `task_id`\
+Sample: AI users
+
+```{r ai-engagement-ownership}
+engagement_ownership_data <- subset(
+  engagement_data,
+  !is.na(epistemic_ownership_binary) &
+    !is.na(read_carefully) &
+    !is.na(z_log_ai_visible_duration_sec) &
+    !is.na(z_log_time_before_ai_sec)
+)
+
+model_engagement_ownership <- glmer(
+  epistemic_ownership_binary ~ read_carefully +
+    z_log_ai_visible_duration_sec +
+    z_log_time_before_ai_sec +
+    (1 | task_id),
+  data = engagement_ownership_data,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+summary(model_engagement_ownership)
+fixed_effects_table(model_engagement_ownership, exponentiate = TRUE)
+```
+
+Reading carefully did not predict binary epistemic ownership, OR = 1.45, p = .331. **Longer AI visible duration predicted higher odds of primarily own-thinking ownership, OR = 1.44, p = .049.** Time before viewing AI was not significant, OR = 0.97, p = .865. Together with Analyses 8B-8C, this suggests that longer viewing time may mark a more selective or editing-oriented strategy: participants who kept the AI visible longer produced less AI-like responses and were more likely to report the final answer as primarily their own thinking.
+
+## Jaccard Similarity vs. Epistemic Ownership
+
+```{r jaccard-ownership-scatter, fig.width=8, fig.height=4.5}
+# Scatter: Jaccard similarity vs. epistemic ownership (continuous scale)
+# Uses AI users from model_data; n is computed below.
+scatter_data <- subset(
+  model_data,
+  ai_used == TRUE &
+    !is.na(jaccard_similarity_to_ai) &
+    !is.na(epistemic_ownership)
+)
+
+rho_jac_own <- cor(
+  scatter_data$jaccard_similarity_to_ai,
+  scatter_data$epistemic_ownership,
+  method = "spearman",
+  use = "complete.obs"
+)
+
+n_scatter <- sum(complete.cases(
+  scatter_data[, c("jaccard_similarity_to_ai", "epistemic_ownership")]
+))
+
+# Tertile splits using rank to avoid duplicate-break error from tied 0s/1s
+n_s <- sum(!is.na(scatter_data$jaccard_similarity_to_ai))
+scatter_data$sim_rank <- rank(scatter_data$jaccard_similarity_to_ai,
+                              ties.method = "average", na.last = "keep")
+scatter_data$similarity_tertile <- cut(
+  scatter_data$sim_rank,
+  breaks = c(0, n_s / 3, 2 * n_s / 3, n_s + 0.1),
+  labels = c("Low", "Medium", "High"),
+  include.lowest = TRUE
+)
+tertile_means <- aggregate(
+  epistemic_ownership ~ similarity_tertile,
+  data = scatter_data,
+  FUN = mean, na.rm = TRUE
+)
+tertile_ns <- table(scatter_data$similarity_tertile)
+
+p_scatter <- ggplot(scatter_data,
+    aes(x = jaccard_similarity_to_ai, y = epistemic_ownership)) +
+  geom_jitter(height = 0.15, width = 0.008,
+              alpha = 0.35, size = 1.8, color = "#4472C4") +
+  geom_smooth(method = "lm", color = "#C00000",
+              se = TRUE, linewidth = 1.1) +
+  annotate("text", x = 0.72, y = 6.7,
+           label = sprintf("rho = %.3f\nn = %d", rho_jac_own, n_scatter),
+           hjust = 0, size = 3.8, fontface = "italic") +
+  scale_y_continuous(breaks = 1:7, limits = c(0.5, 7.5)) +
+  labs(
+    title    = "Similarity to AI vs. Epistemic Ownership",
+    subtitle = "AI users only; 1 = AI's thinking, 7 = my own thinking",
+    x        = "Jaccard Similarity to AI Response",
+    y        = "Epistemic Ownership"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    plot.title    = element_text(face = "bold", size = 12),
+    plot.subtitle = element_text(size = 10)
+  )
+
+p_tertile <- ggplot(tertile_means,
+    aes(x = similarity_tertile, y = epistemic_ownership)) +
+  geom_col(fill = "#70AD47", width = 0.6) +
+  geom_text(
+    aes(label = sprintf("%.2f\nn=%d", epistemic_ownership,
+                        as.integer(tertile_ns[as.character(similarity_tertile)]))),
+    vjust = -0.3, size = 3.2, fontface = "bold", lineheight = 0.9
+  ) +
+  scale_y_continuous(limits = c(0, 6), expand = c(0, 0)) +
+  labs(
+    title = "Ownership by Similarity Tertile",
+    x     = "Similarity tertile",
+    y     = "Mean Epistemic Ownership"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(plot.title = element_text(face = "bold", size = 12))
+
+grid.arrange(p_scatter, p_tertile, ncol = 2,
+  top = grid::textGrob(
+    sprintf("Jaccard Similarity to AI and Epistemic Ownership (AI Users, n = %d)", n_scatter),
+    gp = grid::gpar(fontface = "bold", fontsize = 13)
+  )
+)
+```
+
+## Exploratory Correlation Matrix
+
+This focused matrix gives a broad view of associations among mental-model variables, domain-specific AI-use frequency, engagement measures, similarity measures, ownership, and confidence, **among AI users only**. Spearman correlations are used because several variables are ordinal or skewed. This table is exploratory and should be used to identify patterns worth following up, not as a set of separate confirmatory tests.
+
+```{r exploratory-correlation-matrix}
+correlation_data <- engagement_data
+
+if (!"self_reported_freq_in_assigned_category" %in% names(correlation_data)) {
+  correlation_data$self_reported_freq_in_assigned_category <- NA_real_
+}
+
+correlation_data$z_self_reported_freq <- z(
+  correlation_data$self_reported_freq_in_assigned_category
+)
+
+correlation_data$z_user_decides <- z(
+  correlation_data$exp_ai_does_work_vs_user_decides
+)
+
+correlation_data$z_independent <- z(
+  -correlation_data$exp_independent_vs_reliant
+)
+
+correlation_data$z_instrument_vs_point_of_view <- z(
+  correlation_data$exp_instrument_vs_point_of_view
+)
+
+correlation_data$z_existing_info_vs_creating_new <- z(
+  correlation_data$exp_existing_info_vs_creating_new
+)
+
+correlation_vars <- c(
+  user_decides = "z_user_decides",
+  independent_not_reliant = "z_independent",
+  instrument_vs_point_of_view = "z_instrument_vs_point_of_view",
+  existing_info_vs_creating_new = "z_existing_info_vs_creating_new",
+  domain_freq = "z_self_reported_freq",
+  read_carefully = "read_carefully",
+  log_ai_visible_time = "log_ai_visible_duration_sec",
+  log_time_before_ai = "log_time_before_ai_sec",
+  log_response_writing_time = "log_response_writing_time_sec",
+  jaccard_similarity = "jaccard_similarity_to_ai",
+  embedding_similarity = "embedding_cosine_similarity_to_ai",
+  epistemic_ownership = "epistemic_ownership",
+  confidence = "confidence_level"
+)
+
+correlation_matrix_data <- correlation_data[, correlation_vars]
+names(correlation_matrix_data) <- names(correlation_vars)
+
+spearman_correlations <- round(
+  cor(
+    correlation_matrix_data,
+    use = "pairwise.complete.obs",
+    method = "spearman"
+  ),
+  2
+)
+
+spearman_p_values <- matrix(
+  NA_real_,
+  nrow = length(correlation_vars),
+  ncol = length(correlation_vars),
+  dimnames = list(names(correlation_vars), names(correlation_vars))
+)
+
+for (i in seq_along(correlation_vars)) {
+  for (j in seq_along(correlation_vars)) {
+    x <- correlation_matrix_data[[i]]
+    y <- correlation_matrix_data[[j]]
+    complete_rows <- complete.cases(x, y)
+    if (sum(complete_rows) >= 3) {
+      spearman_p_values[i, j] <- suppressWarnings(
+        cor.test(
+          x[complete_rows],
+          y[complete_rows],
+          method = "spearman",
+          exact = FALSE
+        )$p.value
+      )
+    }
+  }
+}
+
+spearman_p_values <- round(spearman_p_values, 3)
+
+spearman_correlations
+spearman_p_values
+```
+
+```{r exploratory-correlation-heatmap, fig.width=9, fig.height=8}
+cor_heatmap <- spearman_correlations
+
+heat_colors <- colorRampPalette(
+  c("#2b6cb0", "white", "#c53030")
+)(101)
+
+par(mar = c(10, 10, 4, 2))
+
+image(
+  x = seq_len(ncol(cor_heatmap)),
+  y = seq_len(nrow(cor_heatmap)),
+  z = t(cor_heatmap[nrow(cor_heatmap):1, ]),
+  col = heat_colors,
+  zlim = c(-1, 1),
+  axes = FALSE,
+  xlab = "",
+  ylab = "",
+  main = "Spearman correlation matrix"
+)
+
+axis(
+  1,
+  at = seq_len(ncol(cor_heatmap)),
+  labels = colnames(cor_heatmap),
+  las = 2,
+  cex.axis = 0.7
+)
+
+axis(
+  2,
+  at = seq_len(nrow(cor_heatmap)),
+  labels = rev(rownames(cor_heatmap)),
+  las = 2,
+  cex.axis = 0.7
+)
+
+for (i in seq_len(nrow(cor_heatmap))) {
+  for (j in seq_len(ncol(cor_heatmap))) {
+    value <- cor_heatmap[nrow(cor_heatmap) - i + 1, j]
+    text(
+      x = j,
+      y = i,
+      labels = sprintf("%.2f", value),
+      cex = 0.65
+    )
+  }
+}
+
+box()
+
+par(mar = c(5, 4, 4, 2) + 0.1)
+```
+
+**The strongest pattern is that Jaccard and embedding similarity are highly correlated, rho = .94, p \< .001**, so the lexical and semantic uptake measures capture very similar information among AI users.
+
+**Both uptake measures are strongly negatively related to epistemic ownership among AI users:** Jaccard similarity, rho = -.54, p \< .001; embedding similarity, rho = -.54, p \< .001. In plain terms, participants whose final responses were more AI-like tended to report less own-thinking ownership and more perceived AI influence.
+
+**AI visible time and response writing time are positively correlated, rho = .63, p \< .001**, and both are negatively related to AI similarity. AI visible time was negatively related to Jaccard similarity, rho = -.36, p \< .001, and embedding similarity, rho = -.37, p \< .001. Response writing time showed an even stronger negative association with Jaccard similarity, rho = -.59, p \< .001, and embedding similarity, rho = -.58, p \< .001. This supports the idea that fast full-copy users and slower selective/editing users are behaviorally different groups.
+
+Reading carefully was positively related to confidence, rho = .34, p \< .001, but only marginally related to epistemic ownership, rho = .15, p = .054. Reading carefully was also negatively related to Jaccard similarity, rho = -.20, p = .013, and embedding similarity, rho = -.22, p = .005, again suggesting that more attentive engagement may reflect selective use rather than direct copying.
+
+Instrument vs. point-of-view was moderately related to existing info vs. creating new, rho = .42, p \< .001, suggesting these two mental-model beliefs tend to cluster together.
+
+Existing info vs. creating new was not significantly related to epistemic ownership among AI users, rho = .13, p = .103, but it was positively related to confidence, rho = .24, p = .003. This suggests that seeing AI as helping create something new may be more connected to confidence than to ownership once people have already used AI.
+
+**User decides was positively related to epistemic ownership, rho = .21, p = .007.** People who believed AI should defer to their judgment tended to report more own-thinking ownership.
+
+Independent/not reliant was not significantly related to epistemic ownership, rho = .04, p = .661, reinforcing that this predictor is empirically distinct from `user_decides` and does not consistently predict ownership.
