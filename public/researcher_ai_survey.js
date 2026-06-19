@@ -865,8 +865,13 @@ function renderAIMessages(paperId){
   const wrap = document.getElementById('aiMessages-' + paperId);
   if (!wrap) return;
   // Rebuilt purely from DATA.ai_chats — the thinking indicator is transient
-  // UI state and is never part of this array, so it can never leak into the
+  // UI state and is NEVER part of this array, so it can never leak into the
   // research transcript or get sent back to the backend as conversation history.
+  // Deliberately does NOT re-create a thinking indicator here based on pending
+  // state: doing so previously caused the indicator to reappear after the real
+  // reply was rendered, because this function is called from sendAIMessage's
+  // `finally` block. The indicator is owned solely by sendAIMessage via a
+  // direct DOM element reference (see createThinkingMessage / aiThinkingEls).
   wrap.innerHTML = DATA.ai_chats[paperId].map(m => `
     <div class="ai-msg ${m.role}">
       <span class="ai-msg-role">${m.role === 'user' ? 'You' : 'AI Assistant'}</span>
@@ -874,28 +879,43 @@ function renderAIMessages(paperId){
     </div>`).join('');
   wrap.scrollTop = wrap.scrollHeight;
   // If a request is still pending for this paper (e.g. the participant switched
-  // tabs and back while waiting), restore the thinking indicator.
-  if (aiSendInFlight[paperId]) addThinkingMessage(paperId);
+  // tabs and back while waiting), re-attach the existing thinking element (the
+  // same DOM node, not a freshly created one) so there is still only ever one.
+  const pendingEl = aiThinkingEls[paperId];
+  if (aiSendInFlight[paperId] && pendingEl) {
+    wrap.appendChild(pendingEl);
+    wrap.scrollTop = wrap.scrollHeight;
+  }
 }
 
-function addThinkingMessage(paperId){
-  const wrap = document.getElementById('aiMessages-' + paperId);
-  if (!wrap) return;
-  if (document.getElementById('aiThinking-' + paperId)) return; // already showing
-  const thinking = document.createElement('div');
-  thinking.className = 'ai-msg assistant thinking';
-  thinking.id = 'aiThinking-' + paperId;
-  thinking.innerHTML = `
+// Per-paperId map of the single in-flight thinking indicator's DOM element
+// (or undefined when none is showing). Keeping a direct element reference —
+// rather than looking it up by a shared/global id — guarantees we only ever
+// remove the exact node we created for this study's request.
+let aiThinkingEls = {};
+
+function createThinkingMessage(paperId, messagesContainer){
+  // Guard against a duplicate indicator for the same paper (e.g. a stray
+  // double-invocation); reuse the existing element instead of stacking a new one.
+  if (aiThinkingEls[paperId]) return aiThinkingEls[paperId];
+  const thinkingEl = document.createElement('div');
+  thinkingEl.className = 'ai-msg assistant thinking';
+  thinkingEl.setAttribute('aria-label', 'AI is thinking');
+  thinkingEl.innerHTML = `
     <span class="thinking-dot"></span>
     <span class="thinking-dot"></span>
     <span class="thinking-dot"></span>
   `;
-  wrap.appendChild(thinking);
-  wrap.scrollTop = wrap.scrollHeight;
+  messagesContainer.appendChild(thinkingEl);
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  aiThinkingEls[paperId] = thinkingEl;
+  return thinkingEl;
 }
 
 function removeThinkingMessage(paperId){
-  document.getElementById('aiThinking-' + paperId)?.remove();
+  const el = aiThinkingEls[paperId];
+  if (el && el.isConnected) el.remove();
+  delete aiThinkingEls[paperId];
 }
 
 async function callBackendChat(paperId, userMessage){
@@ -933,6 +953,7 @@ async function sendAIMessage(paperId){
   if (aiSendInFlight[paperId]) return; // prevent duplicate requests (Send click or repeated Enter)
   const input = document.getElementById('aiInput-' + paperId);
   const sendBtn = document.getElementById('aiSendBtn-' + paperId);
+  const messagesContainer = document.getElementById('aiMessages-' + paperId);
   const text = (input.value || '').trim();
   if (!text) return; // ignore empty / whitespace-only submissions
 
@@ -948,10 +969,14 @@ async function sendAIMessage(paperId){
   }
   input.value = '';
   renderAIMessages(paperId); // shows the participant's message immediately
-  addThinkingMessage(paperId); // transient three-dot indicator — not part of DATA.ai_chats
+
+  // Direct DOM element reference — never a shared/global id — so cleanup
+  // below can only ever remove this exact node for this exact paperId.
+  const thinkingEl = createThinkingMessage(paperId, messagesContainer);
 
   try {
     const reply = await callBackendChat(paperId, text);
+    // Remove the temporary indicator BEFORE the real reply is stored/rendered.
     removeThinkingMessage(paperId);
     DATA.ai_chats[paperId].push({ role:'assistant', content: reply, ts: nowIso() });
   } catch (err){
@@ -959,6 +984,13 @@ async function sendAIMessage(paperId){
     removeThinkingMessage(paperId);
     DATA.ai_chats[paperId].push({ role:'assistant', content:'The assistant could not respond right now. Please try again.', ts: nowIso() });
   } finally {
+    // Extra safeguard in case it was somehow not removed above (e.g. a thrown
+    // error before either branch ran). Cleanup always happens here regardless
+    // of success or failure, and runs BEFORE the in-flight flag is cleared so
+    // renderAIMessages (called next) never mistakes this for a still-pending request.
+    if (thinkingEl && thinkingEl.isConnected) thinkingEl.remove();
+    delete aiThinkingEls[paperId];
+
     renderAIMessages(paperId);
     aiSendInFlight[paperId] = false;
     if (sendBtn){ sendBtn.disabled = false; sendBtn.textContent = 'Send'; }
