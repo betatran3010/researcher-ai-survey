@@ -11,8 +11,23 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+// Strip zero-width/invisible characters before using a secret pulled from an
+// env var. Pasted keys can pick up a stray zero-width space, BOM, or
+// non-breaking space that plain .trim() does NOT remove, which then breaks
+// request header construction (ByteString conversion) at request time.
+var INVISIBLE_CHARS_RE = new RegExp('[\\u200B\\u200C\\u200D\\uFEFF\\u00A0]', 'g');
+function sanitizeSecret(raw) {
+  if (!raw) return '';
+  return raw.replace(INVISIBLE_CHARS_RE, '').trim();
+}
+
+const OPENAI_API_KEY = sanitizeSecret(process.env.OPENAI_API_KEY);
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || null; // e.g. https://your-survey.onrender.com
+
+// Render (and most PaaS hosts) sit behind a reverse proxy; trust the first
+// hop so express-rate-limit can read X-Forwarded-For correctly.
+app.set('trust proxy', 1);
 
 if (!OPENAI_API_KEY) {
   console.error('[startup] WARNING: OPENAI_API_KEY is not set. /api/chat will return an error to participants until it is configured.');
