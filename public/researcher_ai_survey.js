@@ -87,6 +87,31 @@ const SLIDERS = [
 
 const LANG_OPTIONS = ['English','Other'];
 
+const COUNTRY_OPTIONS = [
+  'Afghanistan','Albania','Algeria','Andorra','Angola','Argentina','Armenia','Australia','Austria',
+  'Azerbaijan','Bahamas','Bahrain','Bangladesh','Barbados','Belarus','Belgium','Belize','Benin','Bhutan',
+  'Bolivia','Bosnia and Herzegovina','Botswana','Brazil','Brunei','Bulgaria','Burkina Faso','Burundi',
+  'Cambodia','Cameroon','Canada','Cape Verde','Central African Republic','Chad','Chile','China','Colombia',
+  'Comoros','Costa Rica','Croatia','Cuba','Cyprus','Czech Republic','Denmark','Djibouti','Dominican Republic',
+  'Ecuador','Egypt','El Salvador','Equatorial Guinea','Eritrea','Estonia','Eswatini','Ethiopia','Fiji',
+  'Finland','France','Gabon','Gambia','Georgia','Germany','Ghana','Greece','Grenada','Guatemala','Guinea',
+  'Guinea-Bissau','Guyana','Haiti','Honduras','Hungary','Iceland','India','Indonesia','Iran','Iraq','Ireland',
+  'Israel','Italy','Ivory Coast','Jamaica','Japan','Jordan','Kazakhstan','Kenya','Kiribati','Kosovo','Kuwait',
+  'Kyrgyzstan','Laos','Latvia','Lebanon','Lesotho','Liberia','Libya','Liechtenstein','Lithuania','Luxembourg',
+  'Madagascar','Malawi','Malaysia','Maldives','Mali','Malta','Marshall Islands','Mauritania','Mauritius',
+  'Mexico','Micronesia','Moldova','Monaco','Mongolia','Montenegro','Morocco','Mozambique','Myanmar','Namibia',
+  'Nauru','Nepal','Netherlands','New Zealand','Nicaragua','Niger','Nigeria','North Korea','North Macedonia',
+  'Norway','Oman','Pakistan','Palau','Palestine','Panama','Papua New Guinea','Paraguay','Peru','Philippines',
+  'Poland','Portugal','Qatar','Romania','Russia','Rwanda','Saint Kitts and Nevis','Saint Lucia',
+  'Saint Vincent and the Grenadines','Samoa','San Marino','Sao Tome and Principe','Saudi Arabia','Senegal',
+  'Serbia','Seychelles','Sierra Leone','Singapore','Slovakia','Slovenia','Solomon Islands','Somalia',
+  'South Africa','South Korea','South Sudan','Spain','Sri Lanka','Sudan','Suriname','Sweden','Switzerland',
+  'Syria','Taiwan','Tajikistan','Tanzania','Thailand','Timor-Leste','Togo','Tonga','Trinidad and Tobago',
+  'Tunisia','Turkey','Turkmenistan','Tuvalu','Uganda','Ukraine','United Arab Emirates','United Kingdom',
+  'United States','Uruguay','Uzbekistan','Vanuatu','Vatican City','Venezuela','Vietnam','Yemen','Zambia',
+  'Zimbabwe','Prefer not to say'
+];
+
 const UNDERSTANDING_OPTIONS = [
   'I have no real understanding of how AI assistants work.',
   'I have a vague, general sense of how AI assistants work.',
@@ -389,7 +414,7 @@ function showPage(id){
   }
 }
 
-const selfNavPages = ['page-consent'];
+const selfNavPages = ['page-consent', 'page-exit'];
 
 function updateNav(){
   const idx = pageOrder.indexOf(getCurrentPageId());
@@ -517,6 +542,14 @@ function toggleConsent(inputId, visualId){
   visual.classList.toggle('checked', input.checked);
 }
 
+function populateCountrySelect(){
+  const select = document.getElementById('ay_country');
+  if (!select || select.dataset.populated) return; // never re-run, so an in-progress selection is never reset
+  const options = COUNTRY_OPTIONS.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  select.insertAdjacentHTML('beforeend', options);
+  select.dataset.populated = 'true';
+}
+
 function renderRadioGroup(containerId, name, options, getLabel, type){
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -533,7 +566,23 @@ function renderRadioGroup(containerId, name, options, getLabel, type){
 }
 
 function initConsentPage(){
-  renderRadioGroup('rg-familiar', 'familiar', ['Yes', 'No, I have not heard of or used any of these']);
+  renderRadioGroup(
+    'rg-familiar',
+    'familiar',
+    ['Yes', 'No, I have not heard of or used any of these']
+  );
+
+  document.querySelectorAll('input[name="familiar"]').forEach(input => {
+    input.addEventListener('change', event => {
+      if (event.target.value.startsWith('No')) {
+        DATA.responses.familiar = event.target.value;
+        DATA.responses.exit_reason = 'not_familiar_with_ai';
+        DATA.session_end_iso = nowIso();
+
+        showExitScreen();
+      }
+    });
+  });
 }
 
 function showExitScreen(){
@@ -1203,6 +1252,7 @@ function finishQuiz(){
 function collectFieldsNow(){
   document.querySelectorAll('textarea[id]').forEach(ta => { DATA.responses[ta.id] = ta.value; });
   document.querySelectorAll('input[type="text"][id], input[type="number"][id]').forEach(inp => { DATA.responses[inp.id] = inp.value; });
+  document.querySelectorAll('select[id]').forEach(sel => { DATA.responses[sel.id] = sel.value; });
   document.querySelectorAll('input[type="range"][data-key]').forEach(inp => { DATA.responses[inp.getAttribute('data-key')] = inp.value; });
   const radioNames = new Set();
   document.querySelectorAll('input[type="radio"]').forEach(r => radioNames.add(r.name));
@@ -1318,6 +1368,15 @@ setInterval(autosave, 10000);
 // ---------- Init ----------
 document.addEventListener('DOMContentLoaded', () => {
   initConsentPage();
+  populateCountrySelect();
+  // Populate the About You / SRL / CT / AI-experience radio groups and sliders
+  // up front. Previously this only happened in finalizeAboutYou(), which runs
+  // when leaving the About You page — so the page-about-you radio groups
+  // (first language, research role, reviewed-a-paper) were still empty the
+  // first time a participant actually saw that page. renderAllSections() is
+  // called again later (in finalizeAboutYou) to refresh CT intro text/order
+  // once condition assignment has happened; calling it here too is harmless.
+  renderAllSections();
   pageOrder = ['page-consent'];
   currentIdx = 0;
   showPage('page-consent');
