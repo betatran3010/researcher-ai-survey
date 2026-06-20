@@ -414,6 +414,8 @@ function fisherYates(arr){
 }
 
 // ---------- Navigation ----------
+let quizTransitionTimer = null;
+
 function showPage(id){
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   const el = document.getElementById(id);
@@ -430,25 +432,44 @@ function showPage(id){
       renderStudyPdfIfNeeded(paperId);
     }
   }
+  // Quiz transition pages have no Continue button — clear any previous
+  // pending timer (so re-showing a page never stacks two timers) and, if the
+  // page we just showed is a transition page, auto-advance after 5s.
+  clearTimeout(quizTransitionTimer);
+  if (/^page-quiz-transition-/.test(id)){
+    quizTransitionTimer = setTimeout(() => navigate(1), 5000);
+  }
 }
 
 const selfNavPages = ['page-consent', 'page-exit'];
 
+// Quiz transition pages (one per assigned paper, see buildQuizPages()) have
+// dynamic ids ('page-quiz-transition-<paperId>') and, like selfNavPages,
+// have no manual Continue button — they auto-advance instead (the 5s timer
+// in showPage()). Matched by pattern rather than added to the fixed
+// selfNavPages array since the ids depend on paper assignment.
+function isSelfNavPage(id){
+  return selfNavPages.includes(id) || /^page-quiz-transition-/.test(id);
+}
+
 function updateNav(){
   const idx = pageOrder.indexOf(getCurrentPageId());
   const total = pageOrder.length;
+  // Quiz transition pages are included in pageOrder (via QUIZ_PAGE_IDS), so
+  // the progress bar automatically accounts for them without any extra math.
   const pct = total > 1 ? Math.round((idx / (total - 1)) * 100) : 0;
   const fill = document.getElementById('progressFill');
   if (fill) fill.style.width = pct + '%';
+  // Step-count text ("Step X of Y") removed per spec; the progress bar is
+  // kept as the sole progress indicator.
   const stepLabel = document.getElementById('navStep');
+  if (stepLabel) stepLabel.textContent = '';
   const btnNext = document.getElementById('btnNext');
   const curId = getCurrentPageId();
-  if (selfNavPages.includes(curId)){
+  if (isSelfNavPage(curId)){
     if (btnNext) btnNext.style.display = 'none';
-    if (stepLabel) stepLabel.textContent = '';
   } else {
     if (btnNext) btnNext.style.display = '';
-    if (stepLabel) stepLabel.textContent = 'Step ' + (idx + 1) + ' of ' + total;
     if (btnNext) btnNext.textContent = (curId === 'page-debrief') ? 'Finish' : (/^page-instructions$/.test(curId) ? 'Begin Task →' : 'Continue →');
   }
   const topMeta = document.getElementById('topMeta');
@@ -776,25 +797,29 @@ function setupSpecifyField(containerId, fieldName, triggerLabel){
 }
 
 // ---------- Instructions text ----------
+const INSTRUCTIONS_TITLE = 'Paper Evaluation Task';
+
 const INSTRUCTIONS_COMMON = [
-  'You will now read two short research studies, presented one at a time.',
-  'For each study, the paper will appear on the left side of the page, and the response questions will appear on the right. After reading the study, you will identify its strengths and limitations, suggest improvements or future directions, and rate how convincing you find its conclusions.',
-  'The studies in this task were artificially constructed for research purposes and are not real published papers. Please approach each study as though you were a researcher evaluating a submitted paper. Apply the same scientific reasoning and judgment that you would use when assessing real research.',
-  'Please answer based on the information provided and your own judgment. There are no single correct answers to the open-ended evaluation questions.',
-  'While completing the task, please remain on this page and do not open new tabs, switch to another application, or use outside tools. The task will be displayed in fullscreen mode to help you focus.'
+  'You will read and evaluate two short research studies, presented one at a time. For each study, the paper will appear on the left and the response questions on the right.',
+  'The studies were artificially constructed for this research and are not real published papers. Please evaluate each one as you would a submitted research paper, using the information provided and your own scientific judgment. There are no single correct answers to the open-ended questions.',
+  'Please remain on the task page, which will be displayed in fullscreen mode. Do not open other tabs or applications or use outside tools, websites, search engines, or notes.'
 ];
 
-const INSTRUCTIONS_AI_ONLY = [
-  'You will have access to an AI assistant during the paper-evaluation task.',
-  'At the top of the right panel, you will see two tabs: Questions, where you will enter your responses; AI Assistant, where you can interact with the AI assistant.',
-  'You may switch between these tabs while reading the paper or preparing your responses. The AI assistant will have access to the paper currently displayed, so you may ask about the paper without pasting the full text.',
-  'You may send up to five messages to the AI assistant for each study. The number of messages remaining will be displayed in the AI Assistant tab. You may decide how to use these messages. After all five messages have been used, you will no longer be able to send additional messages for that study.',
-  'If you choose to use AI, use only the assistant provided on this page. Do not use outside AI assistants, search engines, websites, notes, or other tools. Your interactions with the provided AI assistant will be recorded as part of the study data.'
-];
+// AI-condition-only block: one intro paragraph followed by a bullet list
+// (rendered as <ul><li> by buildInstructionsText, not plain <p> paragraphs
+// like INSTRUCTIONS_COMMON/INSTRUCTIONS_NOAI_ONLY).
+const INSTRUCTIONS_AI_ONLY = {
+  intro: 'You will have access to an AI assistant while evaluating each study.',
+  bullets: [
+    'Use the Questions and AI Assistant tabs to switch between writing your responses and consulting the assistant.',
+    'The assistant will already have access to the study currently displayed.',
+    'You may send up to five messages for each study. The number remaining will be shown in the AI Assistant tab.',
+    'Use only the AI assistant provided within this task. Your interactions with it will be recorded as study data.'
+  ]
+};
 
 const INSTRUCTIONS_NOAI_ONLY = [
-  'Please complete the task using only the research papers provided on this page and your own understanding.',
-  'Do not use AI assistants, search engines, websites, notes, or other outside tools or materials.'
+  'Please evaluate each study using only the paper provided and your own understanding. Do not use AI assistants or any other outside tools or materials.'
 ];
 
 const INSTRUCTIONS_MOCKUP_SVG_QUESTIONS = `<svg viewBox="0 0 560 280" xmlns="http://www.w3.org/2000/svg">
@@ -833,11 +858,34 @@ const INSTRUCTIONS_MOCKUP_SVG_AI = `<svg viewBox="0 0 560 280" xmlns="http://www
 
 const INSTRUCTIONS_MOCKUP_NOTE = 'You may switch between the Questions and AI Assistant tabs at any time.';
 
+// No-AI-condition interface demonstration: same paper-pane + workspace
+// layout as the AI mockups above, but with a single full-width "Questions"
+// header and no AI Assistant tab, matching the real no-AI task UI (which
+// never renders the ai-only tab button at all).
+const INSTRUCTIONS_MOCKUP_SVG_NOAI = `<svg viewBox="0 0 560 280" xmlns="http://www.w3.org/2000/svg">
+  <rect x="2" y="2" width="556" height="276" rx="12" fill="#fff" stroke="#d9e2ec" stroke-width="2"/>
+  <rect x="20" y="20" width="230" height="240" rx="8" fill="#eef2f6" stroke="#d9e2ec"/>
+  <text x="135" y="145" text-anchor="middle" font-family="Inter,sans-serif" font-size="13" fill="#5f6f82">Research paper</text>
+  <rect x="270" y="20" width="270" height="34" rx="8" fill="#f3f7fb" stroke="#d7e0ea"/>
+  <rect x="278" y="27" width="254" height="20" rx="6" fill="#003262"/>
+  <text x="405" y="41" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="700" fill="#fff">Questions</text>
+  <rect x="270" y="64" width="270" height="196" rx="8" fill="#fff" stroke="#d9e2ec"/>
+  <text x="280" y="92" font-family="Inter,sans-serif" font-size="11.5" font-weight="600" fill="#172033">1. What was the purpose of this study?</text>
+  <rect x="280" y="102" width="252" height="52" rx="6" fill="#f3f5f8" stroke="#d9e2ec"/>
+  <text x="280" y="178" font-family="Inter,sans-serif" font-size="11.5" font-weight="600" fill="#172033">2. How was the data collected?</text>
+  <rect x="280" y="188" width="252" height="52" rx="6" fill="#f3f5f8" stroke="#d9e2ec"/>
+</svg>`;
+
 function buildInstructionsText(){
   const isAI = DATA.condition === 'AI';
-  const blocks = [...INSTRUCTIONS_COMMON];
-  if (isAI) blocks.push(...INSTRUCTIONS_AI_ONLY); else blocks.push(...INSTRUCTIONS_NOAI_ONLY);
-  const html = blocks.map(t => `<p style="margin-bottom:14px;">${escapeHtml(t)}</p>`).join('');
+  let html = `<p class="instructions-title">${escapeHtml(INSTRUCTIONS_TITLE)}</p>`;
+  html += INSTRUCTIONS_COMMON.map(t => `<p style="margin-bottom:14px;">${escapeHtml(t)}</p>`).join('');
+  if (isAI){
+    html += `<p style="margin-bottom:14px;">${escapeHtml(INSTRUCTIONS_AI_ONLY.intro)}</p>`;
+    html += `<ul class="instructions-bullets">${INSTRUCTIONS_AI_ONLY.bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('')}</ul>`;
+  } else {
+    html += INSTRUCTIONS_NOAI_ONLY.map(t => `<p style="margin-bottom:14px;">${escapeHtml(t)}</p>`).join('');
+  }
   const textEl = document.getElementById('instructionsText');
   if (textEl) textEl.innerHTML = html;
   const mockupEl = document.getElementById('instructionsMockup');
@@ -846,7 +894,9 @@ function buildInstructionsText(){
       <div class="mockup-block">${INSTRUCTIONS_MOCKUP_SVG_QUESTIONS}</div>
       <p class="mockup-note">${escapeHtml(INSTRUCTIONS_MOCKUP_NOTE)}</p>
       <div class="mockup-block">${INSTRUCTIONS_MOCKUP_SVG_AI}</div>
-    ` : '';
+    ` : `
+      <div class="mockup-block">${INSTRUCTIONS_MOCKUP_SVG_NOAI}</div>
+    `;
   }
 }
 
@@ -1466,21 +1516,37 @@ document.addEventListener('change', (e) => {
 });
 
 // ---------- Quiz ----------
-// Renders one page per comprehension-quiz question. DATA.study_order holds
-// the two assigned paper ids in the same order the participant evaluated
-// them (the unassigned third pool paper is never in this array, so its quiz
+// Renders one page per comprehension-quiz question, plus a short transition
+// page before each paper's block of questions ("You will first/Next answer
+// four questions about: <title>") so participants can tell which paper a
+// question belongs to and when the quiz moves to the second paper. The
+// transition page auto-advances after 5s (see showPage()/quizTransitionTimer)
+// rather than using the Continue button. DATA.study_order holds the two
+// assigned paper ids in the same order the participant evaluated them (the
+// unassigned third pool paper is never in this array, so its quiz/transition
 // is never built/shown here) — iterating it in order naturally satisfies
 // "same order participant evaluated papers" + "no unassigned paper" without
-// any extra bookkeeping. PAPERS[paperId].title is read fresh on every
-// question (not just the first per paper) so the title label appears on
-// every page and always reflects the paper the current question belongs to.
+// any extra bookkeeping. PAPERS[paperId].title is read fresh for both the
+// transition page and every question (not just the first per paper) so the
+// title always reflects the paper the current page belongs to.
 function buildQuizPages(){
   const container = document.getElementById('quizPagesContainer');
   if (!container) return;
   QUIZ_PAGE_IDS = [];
   let html = '';
-  DATA.study_order.forEach(paperId => {
+  DATA.study_order.forEach((paperId, paperIdx) => {
     const paperTitle = PAPERS[paperId].title;
+    const transitionId = 'page-quiz-transition-' + paperId;
+    QUIZ_PAGE_IDS.push(transitionId);
+    const transitionLead = paperIdx === 0
+      ? 'You will first answer four questions about:'
+      : 'Next, you will answer four questions about:';
+    html += `<div class="page quiz-transition-page" id="${transitionId}">
+      <div class="quiz-transition-inner">
+        <p class="quiz-transition-lead">${escapeHtml(transitionLead)}</p>
+        <p class="quiz-transition-title">${escapeHtml(paperTitle)}</p>
+      </div>
+    </div>`;
     PAPERS[paperId].quiz.forEach((qObj, qi) => {
       const pageId = 'page-quiz-' + paperId + '-' + qi;
       QUIZ_PAGE_IDS.push(pageId);
