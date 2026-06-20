@@ -1228,7 +1228,7 @@ function removeThinkingMessage(paperId) {
   delete aiThinkingEls[paperId];
 }
 
-async function callBackendChat(paperId, userMessage) {
+async function callBackendChat(paperId, userMessage, priorHistory) {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1240,7 +1240,14 @@ async function callBackendChat(paperId, userMessage) {
       study_text: getPlainStudyText(paperId),
       study_images: getStudyPdfImages(paperId),
       user_message: userMessage,
-      conversation_history: DATA.ai_chats[paperId]
+      // Must be the history BEFORE this turn, not a live reference to
+      // DATA.ai_chats[paperId] — by the time this fetch fires, the caller has
+      // already pushed the current message into that array, which would (a)
+      // send the current message to the model twice (once here, once via
+      // user_message below) and (b) make the server's re-derived per-paper
+      // message count include the very message currently being sent, off-by-
+      // one-ing the 5-message cap so it always blocks on the 5th message.
+      conversation_history: priorHistory
     })
   });
   if (!response.ok) {
@@ -1287,6 +1294,10 @@ async function sendAIMessage(paperId) {
   // slot the client's own successful_messages-based "remaining" UI shows —
   // eventually blocking every future attempt for that paper with a 429 the
   // participant has no way to recover from.
+  // Snapshot of the history as it stood BEFORE this turn — this, not a live
+  // reference, is what gets sent to the backend as conversation_history (see
+  // callBackendChat). Must be captured before pushing userTurn below.
+  const priorHistory = DATA.ai_chats[paperId].slice();
   const userTurn = { role: 'user', content: text, ts: nowIso() };
   DATA.ai_chats[paperId].push(userTurn);
   if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
@@ -1307,7 +1318,7 @@ async function sendAIMessage(paperId) {
   let errorType = null;
   let reply = null;
   try {
-    reply = await callBackendChat(paperId, text);
+    reply = await callBackendChat(paperId, text, priorHistory);
     // Remove the temporary indicator BEFORE the real reply is stored/rendered.
     removeThinkingMessage(paperId);
     DATA.ai_chats[paperId].push({ role: 'assistant', content: reply, ts: nowIso() });
