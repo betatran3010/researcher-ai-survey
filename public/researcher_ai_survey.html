@@ -55,6 +55,13 @@ input[type="text"]:focus,input[type="number"]:focus{outline:none;border-color:va
 .option-item.selected .option-dot{border-color:var(--warm-gray);background:#fff;}
 .option-dot::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--terra);display:none;}
 .option-item.selected .option-dot::after{display:block;}
+/* Checkbox-type option items (multi-select "Select all that apply" questions)
+   reuse the same .option-item/.option-dot markup as radio items, but should
+   look like a standard checkbox (square, checkmark) rather than a radio
+   button (circle, filled dot) so the UI signals multi-select at a glance. */
+.option-item input[type="checkbox"] + .option-dot{border-radius:5px;}
+.option-item input[type="checkbox"] + .option-dot::after{width:auto;height:auto;border-radius:0;background:none;content:'✓';color:var(--terra);font-size:13px;font-weight:700;line-height:1;}
+.option-item.selected input[type="checkbox"] + .option-dot::after{display:block;}
 .option-text{font-size:1rem;line-height:1.5;color:var(--text);}
 .likert-item{margin-bottom:22px;padding-bottom:22px;border-bottom:1px solid var(--border);}
 .likert-item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}
@@ -126,7 +133,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;hei
 .study-heading{margin:0;font-size:1.4rem;font-weight:800;color:var(--navy);letter-spacing:-0.02em;}
 .workspace-tabs{display:flex;gap:4px;background:#eef2f6;border-radius:10px;padding:4px;}
 .tab-btn{border:none;background:none;padding:8px 16px;border-radius:8px;font-weight:600;font-size:.88rem;font-family:inherit;color:var(--text-light);cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;}
-.tab-btn.active{background:#fff;color:var(--navy);box-shadow:0 2px 6px rgba(0,50,98,.12);}
+.tab-btn.active{background:var(--navy);color:#fff;box-shadow:0 2px 6px rgba(0,50,98,.12);}
 /* AI tab gets a light tint + icon so it reads as "available", not identical
    to a plain inactive tab — otherwise participants can miss it entirely. */
 .tab-btn[data-tab="ai"]:not(.active){background:#f3f7fb;border:1px solid #d7e0ea;}

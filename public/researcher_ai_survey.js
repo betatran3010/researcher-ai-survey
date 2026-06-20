@@ -1411,35 +1411,29 @@ function prepareReflectionsPage(){
   }
 }
 
-// Per-paper AI-engagement (multi-select) + ownership (1-7 scale) blocks, one
-// pair per assigned paper, with the paper's title in the heading so
-// participants aren't asked one ambiguous "overall" question across both
-// papers. Field names are paper-scoped (ai_engagement_<paperId>,
-// whose_thinking_<paperId>) so collectFieldsNow()'s generic name-based
-// collection picks each one up separately.
+// Single shared AI-engagement (multi-select) + ownership (1-7 scale)
+// question pair, asked once across both papers — per the spec's "Select all
+// that apply" / "Overall, whose thinking..." wording (verbatim, not
+// per-paper). Field names are fixed ('ai_engagement', 'whose_thinking') and
+// picked up by collectFieldsNow()'s generic name-based collection.
 function buildPerPaperAiReflections(){
   const wrap = document.getElementById('perPaperAiReflectionsWrap');
   if (!wrap) return;
-  wrap.innerHTML = DATA.study_order.map((paperId, i) => {
-    const engageName = 'ai_engagement_' + paperId;
-    const wtName = 'whose_thinking_' + paperId;
-    return `<div class="q-card">
-      <div class="q-label">Paper ${i+1}: ${escapeHtml(PAPERS[paperId].title)} — How did you engage with the AI assistant while working on this paper? Select all that apply.</div>
-      <div class="options-grid" id="engageWrap-${paperId}"></div>
+  const wtName = 'whose_thinking';
+  wrap.innerHTML = `<div class="q-card">
+      <div class="q-label">How did you engage with the AI assistant during the previous task? Select all that apply.</div>
+      <div class="options-grid" id="engageWrap"></div>
     </div>
     <div class="q-card">
-      <div class="q-label">For Paper ${i+1} (${escapeHtml(PAPERS[paperId].title)}), whose thinking is reflected in your responses?</div>
-      <div class="q-sublabel">1 = Mostly the AI assistant's thinking, 7 = Mostly my own thinking</div>
+      <div class="q-label">Overall, whose thinking is reflected in your responses?</div>
+      <div class="q-sublabel">1 = Mostly the AI assistant's thinking     7 = Mostly my own thinking</div>
       <div class="conf-scale" data-name="${wtName}">${(function(){
         let btns = '';
         for (let v=1; v<=7; v++){ btns += `<button type="button" class="conf-btn" data-name="${wtName}" data-val="${v}" onclick="selectConvincing(this)">${v}</button>`; }
         return btns;
       })()}</div>
     </div>`;
-  }).join('');
-  DATA.study_order.forEach(paperId => {
-    renderRadioGroup('engageWrap-' + paperId, 'ai_engagement_' + paperId, ENGAGEMENT_OPTIONS, o => o.l, 'checkbox');
-  });
+  renderRadioGroup('engageWrap', 'ai_engagement', ENGAGEMENT_OPTIONS, o => o.l, 'checkbox');
 }
 
 // Exclusive-checkbox handling + selected-state styling
