@@ -65,7 +65,7 @@ const DATA = {
 // ---------- Option constants ----------
 const ROLE_OPTIONS = [
   {l:'Undergraduate research assistant', tier:'lower'},
-  {l:'Post-bac research assistant or lab manager', tier:'lower'},
+  {l:'Post-baccalaureate research assistant or lab manager', tier:'lower'},
   {l:"Master's student", tier:'lower'},
   {l:'First-year PhD student', tier:'lower'},
   {l:'Second-year PhD student', tier:'higher'},
@@ -75,37 +75,35 @@ const ROLE_OPTIONS = [
   {l:'Postdoctoral scholar', tier:'higher'}
 ];
 
-const S2_TYPE_OPTIONS = [
-  {l:'Writing or print', sub:'Something you read or consult, like a book or document.'},
-  {l:'A library or search engine', sub:'A way to find existing information.'},
-  {l:'A market or aggregator', sub:'A source that pulls together options or offerings.'},
-  {l:'A colleague or advisor', sub:'Someone you talk through ideas and problems with.'},
-  {l:'A calculator or specialized tool', sub:'A tool you use for a specific, well-defined task.'}
-];
-
-const USAGE_ITEMS = [
-  ['usage_info','Finding information and practical guidance'],
-  ['usage_writing','Writing, editing, or communicating'],
-  ['usage_coding','Coding, math, or technical work'],
-  ['usage_creative','Creative work: brainstorming, fiction, generating ideas'],
-  ['usage_learning','Learning or understanding a topic in depth'],
-  ['usage_advice','Getting advice or talking through a decision'],
-  ['usage_summarize','Summarizing content and forming opinions']
+// Section 4, Q1 — "For which research-related purposes do you use AI
+// assistants? Select all that apply." (verbatim option list, spec section 4)
+const AI_PURPOSE_OPTIONS = [
+  {l:'Finding information or practical guidance'},
+  {l:'Understanding papers, methods, or concepts'},
+  {l:'Summarizing research materials'},
+  {l:'Brainstorming research questions, hypotheses, study designs, or other research ideas'},
+  {l:'Writing, editing, presentations, or research communication'},
+  {l:'Coding, mathematics, quantitative analysis, or other technical work'},
+  {l:'Interpreting results'},
+  {l:'Evaluating arguments, evidence, methods, or research designs'},
+  {l:'Talking through a research decision'},
+  {l:'Other', specify:true}
 ];
 
 const TENURE_OPTIONS = [
   'I am just starting out',
   'Less than 6 months',
-  '6 to 12 months',
-  '1 to 2 years',
+  '6–12 months',
+  '1–2 years',
   'More than 2 years'
 ];
 
+// Section 4, Q4 sliders (verbatim left/right anchor text from spec)
 const SLIDERS = [
-  {key:'slider_role_balance', left:'I mostly tell the AI what to do.', right:'The AI mostly tells me what to do.'},
-  {key:'slider_dependence', left:'I rarely depend on AI to get things done.', right:'I heavily depend on AI to get things done.'},
-  {key:'slider_origin', left:'My ideas usually come from me first.', right:'My ideas usually come from the AI first.'},
-  {key:'slider_personhood', left:'I think of AI as a tool, not a person.', right:'I think of AI as something like a person.'}
+  {key:'slider_role_balance', q:'When I use AI for research work, my role is...', left:'AI does the work, I use what it produces', right:'I do the work, AI at most assists my decisions'},
+  {key:'slider_dependence', q:'Over time, using AI has made me...', left:'More capable and independent on my own in research tasks', right:'More reliant on AI for research tasks I used to do myself'},
+  {key:'slider_origin', q:'When I use AI for research work, it feels like it is...', left:'Surfacing information that already exists', right:'Creating something new or creative'},
+  {key:'slider_personhood', q:'AI feels to me like...', left:'A neutral, impersonal instrument', right:'Something with its own point of view'}
 ];
 
 const LANG_OPTIONS = ['English','Other'];
@@ -138,20 +136,20 @@ const COUNTRY_OPTIONS = [
 ];
 
 const UNDERSTANDING_OPTIONS = [
-  'I have no real understanding of how AI assistants work.',
-  'I have a vague, general sense of how AI assistants work.',
-  'I have a fairly good understanding of how AI assistants work.',
-  'I have a detailed, technical understanding of how AI assistants work.'
+  'I just use it. I do not think much about how it works.',
+  'I have a general sense. It learns from a lot of text and generates responses.',
+  'I understand it reasonably well. I know about training, prompting, and limitations.',
+  'I understand it technically. I work with or study AI systems.'
 ];
 
 const ENGAGEMENT_OPTIONS = [
-  {l:'I used it to clarify or check my understanding of the studies.'},
-  {l:'I used it to summarize parts of the study.'},
-  {l:'I used it to help me develop, refine, or question my own ideas.'},
-  {l:'I used it to suggest possible interpretations, critiques, limitations, or future directions.'},
+  {l:'I used it to clarify or check my understanding of the study.'},
+  {l:'I used it to summarize part or all of the study.'},
+  {l:'I used it to help develop, refine, or question my own ideas.'},
+  {l:'I used it to suggest possible interpretations, strengths, limitations, or future directions.'},
   {l:'I used it to organize, phrase, or improve my written responses.'},
-  {l:'I only glanced at AI’s responses or used it minimally', exclusive:true},
-  {l:'I did not use the AI assistant', exclusive:true}
+  {l:'I read its responses but made little or no use of them in my answers.'},
+  {l:'I did not use the AI assistant for this study.', exclusive:true}
 ];
 
 // SRL — 21 items, 6 categories (verbatim from spec)
@@ -182,7 +180,7 @@ const SRL_ITEMS = [
   ['srl_help_identify','I try to identify specific questions I can ask when I need help.','help_seeking'],
   ['srl_help_guidance','When I am unsure where to start, I seek guidance to help me decide how to approach the task.','help_seeking'],
   ['srl_help_beforeown','I ask other people or AI what to think about a research task before I have formed my own view.','help_seeking'],
-  ['srl_help_own_r','Even when I am having trouble understanding something, I prefer to work through it on my own before asking for help. (R)','help_seeking']
+  ['srl_help_own_r','Even when I am having trouble understanding something, I prefer to work through it on my own before asking for help. (Reverse-scored)','help_seeking']
 ];
 
 // Critical-Thinking scale — 6 items (verbatim), shared by pre/post placement
@@ -200,18 +198,24 @@ const CT_ITEMS_LIST = (function(){
   return out;
 })();
 
-const CT_INTRO_PRE = 'Please indicate how well the following statements describe the way you typically evaluate research claims, evidence, or explanations. Answer based on how you usually behave, not how you think you should behave. There are no right or wrong answers.';
-const CT_INTRO_POST = 'Before finishing, we would like to ask a few general questions about how you typically evaluate research information. The following questions ask about your general habits when evaluating research claims, evidence, and explanations. Please answer based on how you usually approach these kinds of tasks, rather than only on the studies you completed today or how you think you should respond. There are no right or wrong answers.';
+// Spec section 8 says to insert the identical "How You Evaluate Research
+// Claims" section for the after-task placement, so pre and post share one
+// intro string rather than separate wording.
+const CT_INTRO = 'Please indicate how well each statement describes the way you typically evaluate research claims, evidence, or explanations. Answer based on how you usually behave, not how you think you should behave. There are no right or wrong answers.';
+const CT_INTRO_PRE = CT_INTRO;
+const CT_INTRO_POST = CT_INTRO;
 const CT_SCALE_NOTE = '1 = Not at all true for me, 7 = Very true for me';
 
+// Spec section 6, "Standardized In-Task Questions For Each Assigned Study" —
+// this exact 5-question set is repeated verbatim for Paper 1 and Paper 2
+// (no per-paper custom wording), so the label lives here rather than per
+// paper as in the previous version.
 const STANDARD_Q_DEFS = [
-  {suffix:'q1', type:'textarea'},
-  {suffix:'q2', type:'textarea'},
-  {suffix:'q3', type:'textarea'},
-  {suffix:'q4', type:'textarea'},
-  {suffix:'q5', type:'textarea'},
-  {suffix:'convincing', type:'scale7'},
-  {suffix:'convincing_why', type:'textarea'}
+  {suffix:'q1', type:'textarea', label:'What do you think are the main strengths of this study?'},
+  {suffix:'q2', type:'textarea', label:'What do you think are the main limitations of this study?'},
+  {suffix:'q3', type:'textarea', label:'How could the study be improved, or what should researchers investigate next?'},
+  {suffix:'q4', type:'textarea', label:'What broader implications might follow from these findings beyond those stated in the paper?'},
+  {suffix:'convincing', type:'scale7', label:'How convincing do you find this paper?'}
 ];
 
 // ---------- Papers ----------
@@ -220,132 +224,105 @@ const PAPERS = {
     id:'font',
     title:'Generational Differences in Font-Based Credibility Judgments Across Everyday Contexts',
     pdfFile:'papers/font.pdf',
-    questionLabels:{
-      q1:'Why did the researchers think it was important to study whether different generations trust different fonts in different contexts?',
-      q2:'Why did the researchers test three different serif/sans-serif font pairs across multiple everyday scenarios instead of relying on just one pair and one scenario?',
-      q3:'What did the Generation × Scenario interaction show about when older and younger adults trusted serif or sans-serif fonts?',
-      q4:'In your opinion, what visual cues, such as font, layout, spacing, or formatting, make a document, website, or message feel more or less trustworthy to you?',
-      q5:'What other reactions besides trustworthiness might be affected by typeface choice?',
-      convincing:'How convincing do you find this paper?',
-      convincing_why:'Please explain your rating. You may discuss strengths, limitations, possible improvements, or future directions.'
-    },
     quiz:[
-      { q:'How was font exemplar pair handled in the study?',
+      { q:'Why did the researchers include three different serif/sans-serif font pairs?',
         options:[
-          'A. Only one font pair (Times vs. Arial) was used across all scenarios.',
-          'B. Participants chose their own preferred font pair before starting.',
-          'C. Three font exemplar pairs (Times/Arial, Georgia/Helvetica, Garamond/Calibri) were used, and each participant was randomly assigned one pair.',
-          'D. Each participant saw all three font pairs in a fixed order.'
-        ], correct:'C' },
-      { q:'What additional measure did participants provide after choosing which version was more trustworthy?',
-        options:[
-          'A. Their age and education level again.',
-          'B. A written explanation of their reasoning.',
-          'C. A ranking of all scenarios from most to least trustworthy.',
-          'D. A confidence rating for that choice.'
-        ], correct:'D' },
-      { q:'When the researchers added exemplar pair (Times/Arial, Georgia/Helvetica, Garamond/Calibri) as a factor in the analysis, what did they find?',
-        options:[
-          'A. Only one exemplar pair drove the entire effect.',
-          'B. The overall pattern of results held across the different exemplar pairs.',
-          'C. The effect reversed direction depending on the pair.',
-          'D. Exemplar pair eliminated the Generation × Scenario interaction.'
+          'A. To compare whether some font pairs produced stronger credibility judgments because they were easier to read',
+          'B. To determine whether the generational difference remained when the specific typefaces changed, rather than depending on one familiar font contrast',
+          'C. To ensure that each communicative context was presented in a different serif/sans-serif pair',
+          'D. To examine whether older and younger adults differed in their familiarity with the six individual typefaces'
         ], correct:'B' },
-      { q:'What did the correlation between confidence ratings and cohort-typical choices suggest?',
+      { q:'What is the best description of how trustworthiness was measured in the study?',
         options:[
-          'A. Participants were more confident when their choice matched the pattern typical of their generation.',
-          'B. Confidence was unrelated to which font was chosen.',
-          'C. Younger adults were consistently less confident than older adults.',
-          'D. Confidence ratings could not be analyzed due to missing data.'
-        ], correct:'A' }
+          'A. Participants rated the trustworthiness of each font version separately, and the two ratings were compared',
+          'B. Participants rated how well each typeface fit the context, which was used as an indirect measure of trust',
+          'C. Participants selected the more trustworthy version and then ranked all three font pairs',
+          'D. Participants chose which of two identically worded versions they found more trustworthy'
+        ], correct:'D' },
+      { q:'Which statement best describes the Generation × Scenario interaction?',
+        options:[
+          'A. Older adults showed their strongest serif preference in print-legacy contexts, whereas younger adults showed their clearest sans-serif preference in digitally native contexts',
+          'B. Older adults preferred serif typefaces more than younger adults across all four scenarios, and the size of this difference remained constant across contexts',
+          'C. Younger adults\' confidence ratings varied more across scenarios than older adults\' ratings did',
+          'D. The interaction was driven mainly by the bank security notice, which produced the largest generational difference'
+        ], correct:'A' },
+      { q:'What explanation do the authors propose for the study\'s results?',
+        options:[
+          'A. Communication context determines which typeface category appears credible: serif fonts naturally fit formal contexts, whereas sans-serif fonts naturally fit digital contexts, regardless of the reader\'s background',
+          'B. Age-related differences in visual processing make serif fonts easier for older adults to interpret and sans-serif fonts easier for younger adults to interpret',
+          'C. Repeated exposure to a typeface category in particular communicative contexts builds familiarity with that pairing, so what feels credible depends on a person\'s exposure history',
+          'D. Individual typefaces possess relatively stable credibility cues, but different scenarios change how strongly readers attend to those cues'
+        ], correct:'C' }
     ]
   },
   food: {
     id:'food',
     title:'Does Food Processing Change Blood Sugar and Insulin Responses to a Calorie-Matched Lunch?',
     pdfFile:'papers/food.pdf',
-    questionLabels:{
-      q1:'Why did the researchers think it was important to study whether two lunches with the same calorie label could affect the body differently?',
-      q2:'Why did the researchers use a within-subjects crossover design — having the same 48 people eat both lunches on separate days — rather than comparing two separate groups of people?',
-      q3:'What did the study find about how the ultra-processed lunch affected glucose, insulin, and later snack intake compared with the minimally processed lunch?',
-      q4:'Does this study fit with or challenge how you usually think about what makes a meal “enough”? Why?',
-      q5:'People are often busy and have to choose lunch based on many competing factors, such as time, cost, taste, convenience, and how full or focused they want to feel later. What ideas can you think of to weigh those tradeoffs?',
-      convincing:'How convincing do you find this paper?',
-      convincing_why:'Please explain your rating. You may discuss strengths, limitations, possible improvements, or future directions.'
-    },
     quiz:[
-      { q:'What system did the researchers use to categorize the two lunches by processing level?',
+      { q:'Why did the researchers use a within-subjects crossover design, with each participant eating both lunches on separate days?',
         options:[
-          'A. The NOVA classification system.',
-          'B. The USDA MyPlate system.',
-          'C. The glycemic index scale.',
-          'D. A custom 10-point processing scale created for this study.'
+          'A. To compare each participant\'s responses across lunches while reducing the influence of stable metabolic differences between individuals',
+          'B. To isolate processing level by ensuring that the two lunches were identical in every respect except how they were prepared',
+          'C. To test whether eating one lunch changed participants\' metabolic response to the lunch served at the later visit',
+          'D. To increase the effective sample size by treating the two visits as independent observations from different participants'
         ], correct:'A' },
-      { q:'How did the researchers measure later eating after lunch?',
+      { q:'Why did the researchers use two blood draws rather than repeated blood sampling across the entire visit?',
         options:[
-          'A. Participants self-reported what they ate for the rest of the day.',
-          'B. Researchers measured blood glucose only.',
-          'C. Participants completed a food-frequency questionnaire the next week.',
-          'D. A snack tray was weighed before and after participants had access to it.'
+          'A. Because the continuous glucose monitor captured the full metabolic response, making later insulin and triglyceride measurements unnecessary',
+          'B. Because insulin and triglycerides were expected to remain relatively stable after the 60-minute measurement',
+          'C. To ensure that collecting blood did not affect how much participants later ate from the snack tray',
+          'D. To limit the burden of repeated blood draws while still measuring insulin and triglycerides at a time when post-meal responses typically peak'
         ], correct:'D' },
-      { q:'What was one reason the researchers used two blood draws rather than repeated blood sampling across the whole visit?',
+      { q:'What did the correlation between the post-lunch glucose dip and snack intake suggest?',
         options:[
-          'A. Repeated sampling was not approved by the ethics board.',
-          'B. Blood draws were extremely expensive to analyze.',
-          'C. To minimize participant burden and discomfort while still capturing key timepoints.',
-          'D. Participants refused to allow more than two draws.'
+          'A. Larger glucose drops were associated with greater snack intake, indicating that the glucose dip fully accounted for the lunch-condition difference in later eating',
+          'B. Larger glucose drops were associated with greater snack intake only after the ultra-processed lunch, indicating that the relationship did not occur in the other condition',
+          'C. Larger glucose drops were associated with greater snack intake, but the correlation alone could not establish that the glucose dip caused participants to eat more',
+          'D. Larger glucose drops predicted greater snack intake even after differences in taste and texture were controlled statistically'
         ], correct:'C' },
-      { q:'What is one limitation the authors noted about how the two lunches differed beyond processing level?',
+      { q:'What mechanism do the authors propose linking food processing to the different metabolic responses?',
         options:[
-          'A. The lunches differed in total calories.',
-          'B. Taste, familiarity, and texture were not fully controlled between the two lunches.',
-          'C. The lunches were served at different times of day.',
-          'D. Participants ate the lunches in different locations.'
-        ], correct:'B' }
+          'A. Greater processing makes food easier to break down and absorb, which may produce a sharper glucose rise, a larger insulin response, and a later decline',
+          'B. Ultra-processed foods contain more metabolizable calories than their labels report, even when labeled calories and macronutrients are matched',
+          'C. Additives in ultra-processed foods directly impair insulin signaling, causing glucose to remain elevated throughout the observation period',
+          'D. Minimally processed foods require more chewing, and the slower eating rate accounts for the observed glucose and insulin differences'
+        ], correct:'A' }
     ]
   },
   listing: {
     id:'listing',
     title:'Do Online Product Listings Accurately Describe What Arrives in the Package?',
     pdfFile:'papers/listing.pdf',
-    questionLabels:{
-      q1:'Why did the researchers think it was important to study whether online product listings accurately describe what arrives in the package?',
-      q2:'Why did the researchers sample products across three different seller types instead of treating all listings as one group?',
-      q3:'What did the study find when comparing how well audit-coded mismatch scores versus star ratings predicted a listing’s archival item-not-as-described return rate?',
-      q4:'Which product category would you personally be most cautious about buying online, and what specific feature of the listing would you want verified before purchasing?',
-      q5:'Imagine two listings for the same product: one has a high star rating with no other information, the other has a slightly lower star rating but a published accuracy-audit score. Which would you trust more, and why?',
-      convincing:'How convincing do you find this paper?',
-      convincing_why:'Please explain your rating. You may discuss strengths, limitations, possible improvements, or future directions.'
-    },
     quiz:[
-      { q:'Which pattern best describes how mismatch rates varied by category?',
+      { q:'What did the researchers use as an external benchmark to assess whether audit-coded mismatch scores or star ratings reflected real-world listing problems?',
         options:[
-          'A. Mismatch rates were roughly equal across all categories.',
-          'B. Clothing had the highest mismatch rates and electronics the lowest.',
-          'C. Mismatch rates were highest for low-priced items only.',
-          'D. Skincare and chargers had the highest mismatch rates, while clothing had the lowest.'
-        ], correct:'D' },
-      { q:'Which mismatch type was reported as most common?',
+          'A. Each listing\'s overall return rate, which combined returns due to inaccurate descriptions with returns for fit, preference, damage, and other reasons',
+          'B. The proportion of written reviews that mentioned discrepancies between the listing and the delivered product',
+          'C. Each listing\'s trailing 90-day item-not-as-described return rate, which recorded returns attributed specifically to the product not matching its listing',
+          'D. The number of customer complaints or policy reports submitted against the seller during the preceding 90 days'
+        ], correct:'C' },
+      { q:'How did the researchers sample products across the three seller types within each product category?',
         options:[
-          'A. Wrong color or size shipped.',
-          'B. An overstated marketing or performance claim.',
-          'C. Missing accessories or parts.',
-          'D. Counterfeit branding.'
+          'A. They sampled seller types in proportion to their share of listings on the marketplace',
+          'B. They sampled the same number of products from each seller type within every category',
+          'C. They sampled more seller-shipped third-party listings in categories expected to have higher mismatch rates',
+          'D. They sampled products from only one seller type within each category'
         ], correct:'B' },
-      { q:'What happened when star rating was added to a model that already included an audit-coded mismatch score?',
+      { q:'Which conclusion is best supported by the category-specific mismatch results?',
         options:[
-          'A. Model fit improved only marginally.',
-          'B. Model fit improved substantially.',
-          'C. Star rating made the model fit worse.',
-          'D. Star rating could not be included due to missing data.'
-        ], correct:'A' },
-      { q:'How was the purchasing of audited products spread out over the course of the study?',
+          'A. Product categories differed mainly in how often mismatches occurred, while the types of claims that failed were broadly similar across categories',
+          'B. Product categories differed both in their overall mismatch rates and in the kinds of listing claims that were most often inaccurate',
+          'C. Differences between product categories were primarily caused by unequal representation of the three seller types',
+          'D. Categories with more easily measurable physical features, such as dimensions or capacity, consistently showed the highest mismatch rates'
+        ], correct:'B' },
+      { q:'Why might star ratings fail to closely track objective listing accuracy, according to the authors?',
         options:[
-          'A. All products were purchased on a single day.',
-          'B. Products were purchased once per month for two months.',
-          'C. Purchases occurred across multiple waves over about a year.',
-          'D. Purchases were made only during major sales events.'
-        ], correct:'C' }
+          'A. Star ratings are calculated across all products sold by the same seller, whereas mismatch scores were calculated for individual listings',
+          'B. Star ratings are based primarily on whether a product was returned, whereas mismatch scores were based on direct inspection',
+          'C. Star ratings place greater weight on recent reviews, whereas mismatch scores weighted every audited claim equally',
+          'D. Star ratings combine listing accuracy with other aspects of the purchase, such as shipping, customer service, packaging, and price satisfaction'
+        ], correct:'D' }
     ]
   }
 };
@@ -736,6 +713,7 @@ function renderScale7Block(containerId, items, leftLab, rightLab, append){
 function renderAllSections(){
   // About You
   renderRadioGroup('rg-ay-lang', 'lang', LANG_OPTIONS);
+  setupSpecifyField('rg-ay-lang', 'lang', 'Other');
   renderRadioGroup('rg-ay-role', 'ay_role', ROLE_OPTIONS, o => o.l);
   renderRadioGroup('rg-ay-reviewed', 'reviewed', REVIEWED_OPTIONS);
 
@@ -751,16 +729,16 @@ function renderAllSections(){
   renderScale7Block('ctWrap', CT_ITEMS_LIST.map(o => [o.key, o.label]));
 
   // AI Experience
-  renderRadioGroup('rg-ai-type', 'ai_type', S2_TYPE_OPTIONS, o => o.l);
+  renderRadioGroup('rg-ai-purpose', 'ai_purpose', AI_PURPOSE_OPTIONS, o => o.l, 'checkbox');
+  setupSpecifyField('rg-ai-purpose', 'ai_purpose', 'Other');
   renderRadioGroup('rg-ai-tenure', 'ai_tenure', TENURE_OPTIONS);
   renderRadioGroup('rg-ai-understanding', 'ai_understanding', UNDERSTANDING_OPTIONS);
-  renderScale7Block('usageLikertBody', USAGE_ITEMS);
 
   const slidersWrap = document.getElementById('slidersWrap');
   if (slidersWrap){
     slidersWrap.innerHTML = SLIDERS.map(s => `
       <div class="slider-block">
-        <div class="slider-q"></div>
+        <div class="slider-q">${escapeHtml(s.q)}</div>
         <div class="slider-ends">
           <div class="slider-end">${escapeHtml(s.left)}</div>
           <div class="slider-end right">${escapeHtml(s.right)}</div>
@@ -771,20 +749,47 @@ function renderAllSections(){
   }
 }
 
+// Shows/hides a free-text "specify" input next to a checkbox/radio group
+// whenever the option literally labeled `triggerLabel` (e.g. "Other") is
+// checked — used for the spec's "Other [specify]" options. Stores the typed
+// text in DATA.responses[fieldName + '_specify'].
+function setupSpecifyField(containerId, fieldName, triggerLabel){
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  let specifyEl = document.getElementById(containerId + '-specify');
+  if (!specifyEl){
+    specifyEl = document.createElement('input');
+    specifyEl.type = 'text';
+    specifyEl.id = containerId + '-specify';
+    specifyEl.placeholder = 'Please specify';
+    specifyEl.style.marginTop = '10px';
+    specifyEl.style.display = 'none';
+    specifyEl.addEventListener('input', () => { DATA.responses[fieldName + '_specify'] = specifyEl.value; });
+    container.insertAdjacentElement('afterend', specifyEl);
+  }
+  const sync = () => {
+    const checked = container.querySelector(`input[name="${fieldName}"][value="${triggerLabel}"]:checked`);
+    specifyEl.style.display = checked ? '' : 'none';
+  };
+  container.addEventListener('change', sync);
+  sync();
+}
+
 // ---------- Instructions text ----------
 const INSTRUCTIONS_COMMON = [
-  'You will now read three short research studies, presented one at a time. After reading each study, you will answer several questions about it.',
-  'Some questions ask about the study’s purpose, design, or findings. Other questions ask for your own interpretation, evaluation, or opinion. There are no right or wrong answers to the open-ended opinion questions. Please read each study and answer based on the information provided and your own judgment.',
-  'For each study, the research paper will appear on the left side of the page, and the questions will appear on the right.',
-  'While completing the task, please remain on this page and do not open new tabs or switch to another application. The task will be displayed in fullscreen mode to help you focus.'
+  'You will now read two short research studies, presented one at a time.',
+  'For each study, the paper will appear on the left side of the page, and the response questions will appear on the right. After reading the study, you will identify its strengths and limitations, suggest improvements or future directions, and rate how convincing you find its conclusions.',
+  'The studies in this task were artificially constructed for research purposes and are not real published papers. Please approach each study as though you were a researcher evaluating a submitted paper. Apply the same scientific reasoning and judgment that you would use when assessing real research.',
+  'Please answer based on the information provided and your own judgment. There are no single correct answers to the open-ended evaluation questions.',
+  'While completing the task, please remain on this page and do not open new tabs, switch to another application, or use outside tools. The task will be displayed in fullscreen mode to help you focus.'
 ];
 
 const INSTRUCTIONS_AI_ONLY = [
-  'You will have access to an AI assistant during the task.',
+  'You will have access to an AI assistant during the paper-evaluation task.',
   'At the top of the right panel, you will see two tabs: Questions, where you will enter your responses; AI Assistant, where you can interact with the AI assistant.',
-  'You may switch between these tabs at any time. You can open the AI Assistant tab while reading the paper or answering the questions, and then return to the Questions tab when you are ready to continue your responses.',
-  'If you choose to use AI, use only the assistant provided on this page. The AI assistant will have access to the research paper currently displayed, so you may ask questions about its content without needing to paste the paper into the chat. Do not use outside AI assistants, search engines, websites, or other tools.',
-  'Your interactions with the provided AI assistant will be recorded as part of the study data.'
+  'You may switch between these tabs while reading the paper or preparing your responses. The AI assistant will have access to the paper currently displayed, so you may ask about the paper without pasting the full text.',
+  'You may send up to five messages to the AI assistant for each study. The number of messages remaining will be displayed in the AI Assistant tab. You may decide how to use these messages. After all five messages have been used, you will no longer be able to send additional messages for that study.',
+  'If you choose to use AI, use only the assistant provided on this page. Do not use outside AI assistants, search engines, websites, notes, or other tools. Your interactions with the provided AI assistant will be recorded as part of the study data.'
 ];
 
 const INSTRUCTIONS_NOAI_ONLY = [
@@ -857,7 +862,7 @@ function buildStudyPages(){
     const isAI = DATA.condition === 'AI';
 
     const questionsHtml = STANDARD_Q_DEFS.map(def => {
-      const label = paper.questionLabels[def.suffix];
+      const label = def.label;
       const fieldId = paperId + '_' + def.suffix;
       if (def.type === 'scale7'){
         let btns = '';
@@ -866,7 +871,7 @@ function buildStudyPages(){
         }
         return `<div class="q-card">
           <div class="q-label">${escapeHtml(label)}</div>
-          <div class="q-sublabel">1 = Not at all convincing, 7 = Very convincing</div>
+          <div class="q-sublabel">1 = Not at all convincing, 7 = Completely convincing</div>
           <div class="conf-scale" data-name="${fieldId}">${btns}</div>
         </div>`;
       }
@@ -1009,12 +1014,20 @@ function switchWorkspaceTab(paperId, tab){
 const MAX_AI_MESSAGES_PER_PAPER = 5;
 
 function getAiAggregate(paperId){
-  if (!DATA.ai_paper_aggregates[paperId]){
-    DATA.ai_paper_aggregates[paperId] = {
+  // DATA.ai_paper_aggregates pre-populates each pool paper as an empty {}
+  // object (see the DATA literal above), which is truthy — so a plain
+  // "if (!DATA.ai_paper_aggregates[paperId])" guard never actually fills in
+  // the default fields, leaving successful_messages as undefined. That
+  // turned "remaining = MAX - successful_messages" into NaN, which made the
+  // UI report the 5-message limit as already reached on first load. Always
+  // merge in any missing default fields instead of only checking truthiness.
+  const existing = DATA.ai_paper_aggregates[paperId];
+  if (!existing || typeof existing.successful_messages !== 'number'){
+    DATA.ai_paper_aggregates[paperId] = Object.assign({
       tab_opened: false, first_open_ts: null, time_to_first_open_ms: null,
       time_to_first_message_ms: null, total_messages: 0, successful_messages: 0,
       limit_reached: false
-    };
+    }, existing || {});
   }
   return DATA.ai_paper_aggregates[paperId];
 }
@@ -1416,7 +1429,7 @@ function buildPerPaperAiReflections(){
     </div>
     <div class="q-card">
       <div class="q-label">For Paper ${i+1} (${escapeHtml(PAPERS[paperId].title)}), whose thinking is reflected in your responses?</div>
-      <div class="q-sublabel">1 = Mostly AI's thinking, 7 = Mostly my thinking</div>
+      <div class="q-sublabel">1 = Mostly the AI assistant's thinking, 7 = Mostly my own thinking</div>
       <div class="conf-scale" data-name="${wtName}">${(function(){
         let btns = '';
         for (let v=1; v<=7; v++){ btns += `<button type="button" class="conf-btn" data-name="${wtName}" data-val="${v}" onclick="selectConvincing(this)">${v}</button>`; }
