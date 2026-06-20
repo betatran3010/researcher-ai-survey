@@ -230,6 +230,53 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;hei
 .ai-msg-role{display:block;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;opacity:.65;margin-bottom:3px;}
 .ai-msg.user{align-self:flex-end;background:var(--navy);color:#fff;}
 .ai-msg.assistant{align-self:flex-start;background:var(--accent-soft);color:var(--navy-light);}
+.ai-msg-content p{
+  margin:0 0 10px;
+}
+
+.ai-msg-content p:last-child{
+  margin-bottom:0;
+}
+
+.ai-msg-content h1,
+.ai-msg-content h2,
+.ai-msg-content h3,
+.ai-msg-content h4{
+  margin:12px 0 7px;
+  font-family:'Inter',sans-serif;
+  font-size:1rem;
+  font-weight:700;
+  line-height:1.4;
+  color:var(--navy);
+}
+
+.ai-msg-content h1:first-child,
+.ai-msg-content h2:first-child,
+.ai-msg-content h3:first-child,
+.ai-msg-content h4:first-child{
+  margin-top:0;
+}
+
+.ai-msg-content ul,
+.ai-msg-content ol{
+  margin:7px 0 10px;
+  padding-left:22px;
+}
+
+.ai-msg-content li{
+  margin-bottom:7px;
+  line-height:1.55;
+}
+
+.ai-msg-content strong{
+  font-weight:700;
+}
+
+.ai-msg-content br{
+  content:'';
+  display:block;
+  margin-bottom:4px;
+}
 .ai-msg.system-note{align-self:center;background:none;color:var(--warm-gray);font-size:.78rem;font-style:italic;}
 .ai-msg.thinking{align-self:flex-start;display:inline-flex;align-items:center;gap:5px;width:fit-content;min-width:54px;background:#f1f5f9;border:1px solid #e0e7ef;color:#53657a;}
 .thinking-dot{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.35;animation:thinking-bounce 1.2s infinite ease-in-out;}
@@ -739,6 +786,11 @@ body.condition-ai .noai-only{display:none!important;}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<!-- Render AI Markdown safely -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+
 <script src="paper_text_data.js"></script>
 <script src="researcher_ai_survey.js"></script>
 </body>

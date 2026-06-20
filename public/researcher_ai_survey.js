@@ -130,7 +130,7 @@ const COUNTRY_OPTIONS = [
   'Serbia', 'Seychelles', 'Sierra Leone', 'Singapore', 'Slovakia', 'Slovenia', 'Solomon Islands', 'Somalia',
   'South Africa', 'South Korea', 'South Sudan', 'Spain', 'Sri Lanka', 'Sudan', 'Suriname', 'Sweden', 'Switzerland',
   'Syria', 'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Timor-Leste', 'Togo', 'Tonga', 'Trinidad and Tobago',
-  'Tunisia', 'Turkey', 'Turkmenistan', 'Tuvalu', 'Uganda', 'Ukraine', 'United Arab Emirates', 'United Kingdom', 
+  'Tunisia', 'Turkey', 'Turkmenistan', 'Tuvalu', 'Uganda', 'Ukraine', 'United Arab Emirates', 'United Kingdom',
   'Uruguay', 'Uzbekistan', 'Vanuatu', 'Vatican City', 'Venezuela', 'Vietnam', 'Yemen', 'Zambia',
   'Zimbabwe', 'Prefer not to say'
 ];
@@ -513,9 +513,9 @@ function navigate(dir) {
   const curId = getCurrentPageId();
   const idx = pageOrder.indexOf(curId);
   if (curId === 'page-debrief' && dir > 0) {
-  finalizeSubmission();
-  return;
-}
+    finalizeSubmission();
+    return;
+  }
 
   const studyMatch = /^page-study-(\d)$/.exec(curId);
   if (studyMatch && dir > 0) {
@@ -1153,6 +1153,19 @@ function updateAiRemainingUI(paperId) {
   if (sendBtn) sendBtn.disabled = limitReached;
 }
 
+function formatAIMessage(content) {
+  if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') {
+    return escapeHtml(content).replace(/\n/g, '<br>');
+  }
+
+  const rendered = marked.parse(content, {
+    breaks: true,
+    gfm: true
+  });
+
+  return DOMPurify.sanitize(rendered);
+}
+
 function renderAIMessages(paperId) {
   const wrap = document.getElementById('aiMessages-' + paperId);
   if (!wrap) return;
@@ -1165,10 +1178,15 @@ function renderAIMessages(paperId) {
   // `finally` block. The indicator is owned solely by sendAIMessage via a
   // direct DOM element reference (see createThinkingMessage / aiThinkingEls).
   wrap.innerHTML = DATA.ai_chats[paperId].map(m => `
-    <div class="ai-msg ${m.role}">
-      <span class="ai-msg-role">${m.role === 'user' ? 'You' : 'AI Assistant'}</span>
-      ${escapeHtml(m.content)}
-    </div>`).join('');
+  <div class="ai-msg ${m.role}">
+    <span class="ai-msg-role">${m.role === 'user' ? 'You' : 'AI Assistant'}</span>
+    <div class="ai-msg-content">
+      ${m.role === 'assistant'
+      ? formatAIMessage(m.content)
+      : escapeHtml(m.content).replace(/\n/g, '<br>')}
+    </div>
+  </div>
+`).join('');
   wrap.scrollTop = wrap.scrollHeight;
   // If a request is still pending for this paper (e.g. the participant switched
   // tabs and back while waiting), re-attach the existing thinking element (the

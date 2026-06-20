@@ -97,8 +97,8 @@ app.post('/api/chat', async (req, res) => {
 
     // Validate required fields
     if (!isNonEmptyString(participant_id) || !isNonEmptyString(condition) ||
-        !isNonEmptyString(paper_id) || !isNonEmptyString(study_title) ||
-        !isNonEmptyString(user_message)) {
+      !isNonEmptyString(paper_id) || !isNonEmptyString(study_title) ||
+      !isNonEmptyString(user_message)) {
       return res.status(400).json({ error: 'Missing required fields.' });
     }
     if (typeof study_text !== 'string') {
@@ -163,6 +163,8 @@ app.post('/api/chat', async (req, res) => {
       'images were provided and a question depends on such content, say so explicitly rather than guessing. ' +
       'Do not reference studies outside this task. ' +
       'Keep each response under about 200 words and make sure it is complete and self-contained within that limit. ' +
+      'Format responses for easy reading in a narrow chat panel. Use short paragraphs or a brief numbered list when discussing multiple points. ' +
+      'Avoid large headings. Do not place several numbered points in one paragraph. ' +
       'If needed, narrow the scope of your answer rather than running long. ' +
       'Do not provide content that would facilitate harm or illegal activity; if a request cannot be answered safely, briefly note why.\n\n' +
       'Study title: ' + study_title + '\n\n' +
