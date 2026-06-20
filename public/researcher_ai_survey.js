@@ -1276,7 +1276,19 @@ async function sendAIMessage(paperId) {
 
   const sendStartTs = nowTs();
   agg.total_messages++;
-  DATA.ai_chats[paperId].push({ role: 'user', content: text, ts: nowIso() });
+  // Pushed optimistically so the participant sees their own message right
+  // away; kept as a direct object reference (not just an index) so it can be
+  // precisely identified and rolled back below if this attempt fails. A
+  // failed turn must NEVER remain in DATA.ai_chats: this array is sent back
+  // to the server as conversation_history on the next request, and the
+  // server independently re-derives the 5-message-per-paper cap by counting
+  // 'user' turns in that history. If a failed attempt were left in here, it
+  // would permanently inflate the server's count without ever consuming a
+  // slot the client's own successful_messages-based "remaining" UI shows —
+  // eventually blocking every future attempt for that paper with a 429 the
+  // participant has no way to recover from.
+  const userTurn = { role: 'user', content: text, ts: nowIso() };
+  DATA.ai_chats[paperId].push(userTurn);
   if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
   if (!DATA.timing[paperId].first_ai_message_ts) {
     DATA.timing[paperId].first_ai_message_ts = nowTs();
@@ -1305,7 +1317,13 @@ async function sendAIMessage(paperId) {
     errorType = (err && err.message) || 'unknown_error';
     removeThinkingMessage(paperId);
     reply = 'The assistant could not respond right now. Please try again.';
-    DATA.ai_chats[paperId].push({ role: 'assistant', content: reply, ts: nowIso() });
+    // Roll back the optimistic user turn pushed above — a failed exchange
+    // must not remain in DATA.ai_chats (see comment at the push site), so it
+    // is never resent as conversation_history and never counted by either
+    // the client or server message cap. The participant still sees their
+    // message and this error via the transient (non-persisted) render below.
+    const idx = DATA.ai_chats[paperId].indexOf(userTurn);
+    if (idx !== -1) DATA.ai_chats[paperId].splice(idx, 1);
   } finally {
     const sendEndTs = nowTs();
     // Only successful submissions count against the 5-message cap, per spec.
@@ -1333,11 +1351,34 @@ async function sendAIMessage(paperId) {
     delete aiThinkingEls[paperId];
 
     renderAIMessages(paperId);
+    // The failed turn was deliberately rolled back out of DATA.ai_chats above
+    // (so it's never resent as context or counted against the cap), so
+    // renderAIMessages alone would now make the participant's own message
+    // and the error notice both vanish. Append them as DOM-only nodes —
+    // never written back into DATA.ai_chats — purely so the participant can
+    // still see what happened.
+    if (!success) appendTransientFailedTurn(paperId, text, reply);
     aiSendInFlight[paperId] = false;
     if (sendBtn) sendBtn.textContent = 'Send';
     updateAiRemainingUI(paperId); // re-enables (or permanently disables at the cap) input/button
     input && !input.disabled && input.focus();
   }
+}
+
+function appendTransientFailedTurn(paperId, userText, errorText) {
+  const wrap = document.getElementById('aiMessages-' + paperId);
+  if (!wrap) return;
+  wrap.insertAdjacentHTML('beforeend', `
+  <div class="ai-msg user">
+    <span class="ai-msg-role">You</span>
+    <div class="ai-msg-content">${escapeHtml(userText).replace(/\n/g, '<br>')}</div>
+  </div>
+  <div class="ai-msg assistant">
+    <span class="ai-msg-role">AI Assistant</span>
+    <div class="ai-msg-content">${escapeHtml(errorText)}</div>
+  </div>
+`);
+  wrap.scrollTop = wrap.scrollHeight;
 }
 
 // ---------- Anti-cheat / fullscreen monitoring ----------
