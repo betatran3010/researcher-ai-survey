@@ -34,6 +34,10 @@ p{font-size:1.03rem;line-height:1.7;}
 .q-card.secondary{border-color:var(--border);}
 .q-card.intro-card{background:linear-gradient(135deg,#ffffff 0%,#f9fbfd 100%);border-left:5px solid var(--navy);}
 .q-label{font-size:1.08rem;font-weight:700;color:var(--text);line-height:1.55;margin-bottom:18px;}
+/* Smaller section-style label shown above a quiz question to identify which
+   study the question belongs to (distinct from .q-label, the question text
+   itself) — see buildQuizPages() in researcher_ai_survey.js. */
+.quiz-paper-title{font-size:.78rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--warm-gray);margin-bottom:10px;}
 .q-sublabel{font-size:.85rem;color:var(--text-light);margin-bottom:14px;margin-top:-8px;line-height:1.5;}
 textarea{width:100%;border:1.5px solid var(--border);border-radius:13px;padding:16px 18px;font-family:'Inter','Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:1.02rem;font-weight:400;color:var(--text);background:#fff;resize:vertical;min-height:150px;transition:border-color .2s,box-shadow .2s;line-height:1.6;}
 textarea:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 4px rgba(47,93,124,.12);}

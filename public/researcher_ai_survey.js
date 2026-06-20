@@ -1466,12 +1466,21 @@ document.addEventListener('change', (e) => {
 });
 
 // ---------- Quiz ----------
+// Renders one page per comprehension-quiz question. DATA.study_order holds
+// the two assigned paper ids in the same order the participant evaluated
+// them (the unassigned third pool paper is never in this array, so its quiz
+// is never built/shown here) — iterating it in order naturally satisfies
+// "same order participant evaluated papers" + "no unassigned paper" without
+// any extra bookkeeping. PAPERS[paperId].title is read fresh on every
+// question (not just the first per paper) so the title label appears on
+// every page and always reflects the paper the current question belongs to.
 function buildQuizPages(){
   const container = document.getElementById('quizPagesContainer');
   if (!container) return;
   QUIZ_PAGE_IDS = [];
   let html = '';
   DATA.study_order.forEach(paperId => {
+    const paperTitle = PAPERS[paperId].title;
     PAPERS[paperId].quiz.forEach((qObj, qi) => {
       const pageId = 'page-quiz-' + paperId + '-' + qi;
       QUIZ_PAGE_IDS.push(pageId);
@@ -1486,6 +1495,7 @@ function buildQuizPages(){
       }).join('');
       html += `<div class="page" id="${pageId}">
         <div class="q-card">
+          <div class="quiz-paper-title">${escapeHtml(paperTitle)}</div>
           <div class="q-label">${escapeHtml(qObj.q)}</div>
           <div class="options-grid">${optsHtml}</div>
         </div>
