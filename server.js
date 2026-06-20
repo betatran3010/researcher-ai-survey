@@ -8,7 +8,6 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
-const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -46,13 +45,12 @@ const corsOptions = ALLOWED_ORIGIN
   : { origin: true }; // falls back to permissive during local development only
 app.use(cors(corsOptions));
 
-const chatLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 20, // 20 requests per minute per IP
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests. Please wait a moment and try again.' }
-});
+// NOTE: there is intentionally no global/per-IP rate limiter on /api/chat.
+// Participants may be sharing a network (lab, office, campus Wi-Fi), so a
+// per-IP cap would throttle one participant's usage based on another's
+// activity. The only request limit enforced is the per-paper, per-participant
+// 5-message cap below, which is derived from each request's own
+// conversation_history and so cannot be affected by other participants.
 
 // ---------- Static frontend ----------
 app.use(express.static(path.join(__dirname, 'public')));
@@ -84,7 +82,7 @@ function isValidImageDataUrl(v) {
 }
 
 // ---------- POST /api/chat ----------
-app.post('/api/chat', chatLimiter, async (req, res) => {
+app.post('/api/chat', async (req, res) => {
   try {
     const {
       participant_id,
