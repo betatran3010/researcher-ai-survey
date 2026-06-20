@@ -19,15 +19,38 @@ const DATA = {
   session_end_iso: null,
   prolific_id: '',
   consent: false,
+  consent_status: null,        // 'granted' | 'declined'
+  media_release_status: null,  // 'granted' | 'declined'
+  screening_exit_reason: null, // 'not_familiar_with_ai' | 'declined_consent' | null
+  completion_status: 'in_progress', // 'in_progress' | 'completed' | 'exited_early'
+  final_submission_timestamp: null,
+
+  // Legacy fields, kept for backward compatibility with existing export logic.
   expertise_tier: null,
   condition: null,
   ct_scale_placement: null,
   study_order: [],
-  study_1_id: null, study_2_id: null, study_3_id: null,
-  study_1_title: null, study_2_title: null, study_3_title: null,
+  study_1_id: null, study_2_id: null,
+  study_1_title: null, study_2_title: null,
+
+  // New backend randomization variables (spec-required names). Mirror the
+  // legacy fields above so neither the existing export pipeline nor the new
+  // spec's required variable names need to be removed.
+  research_expertise_stratum: null, // mirrors expertise_tier
+  ai_condition: null,               // mirrors condition
+  critical_thinking_placement: null,// mirrors ct_scale_placement
+  assigned_paper_1_id: null, assigned_paper_1_title: null,
+  assigned_paper_2_id: null, assigned_paper_2_title: null,
+  unassigned_paper_id: null,
+  paper_order: [], // mirrors study_order (2 entries)
+
   responses: {},
   ai_chats: { font: [], food: [], listing: [] },
   timing: { font:{}, food:{}, listing:{} },
+  ai_paper_aggregates: { font:{}, food:{}, listing:{} },
+  ai_message_log: [],
+  behavioral_events: [],
+  revision_log: [],
   paste_events: [],
   draft_history: [],
   keystroke_counts: {},
@@ -86,6 +109,8 @@ const SLIDERS = [
 ];
 
 const LANG_OPTIONS = ['English','Other'];
+
+const REVIEWED_OPTIONS = ['None','1–5','6–15','16–30','More than 30'];
 
 const COUNTRY_OPTIONS = [
   'Afghanistan','Albania','Algeria','Andorra','Angola','Argentina','Armenia','Australia','Austria',
@@ -340,7 +365,7 @@ let QUIZ_PAGE_IDS = [];
 function buildPageOrder(){
   const order = ['page-consent','page-about-you','page-srl'];
   if (DATA.ct_scale_placement === 'pre') order.push('page-ct');
-  order.push('page-ai-experience','page-instructions','page-study-1','page-study-2','page-study-3','page-reflections');
+  order.push('page-ai-experience','page-instructions','page-study-1','page-study-2','page-reflections');
   if (DATA.ct_scale_placement === 'post') order.push('page-ct');
   order.push('page-quiz-intro');
   order.push(...QUIZ_PAGE_IDS);
@@ -361,6 +386,11 @@ function applySectionNumbers(){
 }
 
 // ---------- Stratified random assignment ----------
+// Assignment happens exactly once, immediately after the About You page, and
+// is then frozen for the rest of the session by being written into DATA
+// (which autosave() persists to localStorage every 10s and restoreAssignmentIfPresent()
+// can read back). This makes the assignment immune to refresh, resize,
+// tab-switch, or page navigation, since none of those re-run this function.
 function assignConditionAndOrder(){
   const tier = DATA.expertise_tier;
   const counterKey = 'strat_counter_' + tier;
@@ -369,22 +399,33 @@ function assignConditionAndOrder(){
   const condition = (counter % 2 === 0) ? 'AI' : 'noAI';
   try { localStorage.setItem(counterKey, String(counter + 1)); } catch(e){}
   DATA.condition = condition;
+  DATA.ai_condition = condition;
   document.body.classList.add(condition === 'AI' ? 'condition-ai' : 'condition-noai');
 
-  // 4-way stratification of CT placement within tier+condition: alternate pre/post
+  // CT placement is counterbalanced independently WITHIN each tier+condition
+  // cell (4 cells total: lower/higher x AI/noAI), alternating pre/post.
   const ctKey = 'strat_ct_counter_' + tier + '_' + condition;
   let ctCounter = 0;
   try { ctCounter = parseInt(localStorage.getItem(ctKey) || '0', 10); } catch(e){}
   DATA.ct_scale_placement = (ctCounter % 2 === 0) ? 'pre' : 'post';
+  DATA.critical_thinking_placement = DATA.ct_scale_placement;
   try { localStorage.setItem(ctKey, String(ctCounter + 1)); } catch(e){}
 
-  const order = [...PAPER_IDS];
-  fisherYates(order);
+  // Select 2 of the 3 pool papers without replacement, in randomized
+  // presentation order; the third stays unassigned for this participant.
+  const shuffledPool = fisherYates([...PAPER_IDS]);
+  const order = shuffledPool.slice(0, 2);
+  const unassigned = shuffledPool[2];
+
   DATA.study_order = order;
-  DATA.study_1_id = order[0]; DATA.study_2_id = order[1]; DATA.study_3_id = order[2];
+  DATA.study_1_id = order[0]; DATA.study_2_id = order[1];
   DATA.study_1_title = PAPERS[order[0]].title;
   DATA.study_2_title = PAPERS[order[1]].title;
-  DATA.study_3_title = PAPERS[order[2]].title;
+
+  DATA.paper_order = [...order];
+  DATA.assigned_paper_1_id = order[0]; DATA.assigned_paper_1_title = PAPERS[order[0]].title;
+  DATA.assigned_paper_2_id = order[1]; DATA.assigned_paper_2_title = PAPERS[order[1]].title;
+  DATA.unassigned_paper_id = unassigned;
 }
 
 function fisherYates(arr){
@@ -486,6 +527,7 @@ function finalizeAboutYou(){
   const roleVal = document.querySelector('input[name="ay_role"]:checked');
   const roleObj = roleVal ? ROLE_OPTIONS.find(o => o.l === roleVal.value) : null;
   DATA.expertise_tier = roleObj ? roleObj.tier : 'lower';
+  DATA.research_expertise_stratum = DATA.expertise_tier;
   assignConditionAndOrder();
   buildPageOrder();
   renderAllSections();
@@ -577,6 +619,8 @@ function initConsentPage(){
       if (event.target.value.startsWith('No')) {
         DATA.responses.familiar = event.target.value;
         DATA.responses.exit_reason = 'not_familiar_with_ai';
+        DATA.screening_exit_reason = 'not_familiar_with_ai';
+        DATA.completion_status = 'exited_early';
         DATA.session_end_iso = nowIso();
 
         showExitScreen();
@@ -596,6 +640,10 @@ function showExitScreen(){
 }
 
 function declineConsent(){
+  DATA.consent_status = 'declined';
+  DATA.screening_exit_reason = 'declined_consent';
+  DATA.completion_status = 'exited_early';
+  DATA.session_end_iso = nowIso();
   showExitScreen();
 }
 
@@ -630,12 +678,17 @@ function submitConsentPage(){
   if (errEl) errEl.style.display = 'none';
 
   if (familiar.value.startsWith('No')){
+    DATA.screening_exit_reason = 'not_familiar_with_ai';
+    DATA.completion_status = 'exited_early';
+    DATA.session_end_iso = nowIso();
     showExitScreen();
     return;
   }
 
   DATA.prolific_id = prolific;
   DATA.consent = true;
+  DATA.consent_status = 'granted';
+  DATA.media_release_status = 'granted';
 
   buildPageOrder();
   currentIdx = pageOrder.indexOf('page-about-you');
@@ -684,7 +737,7 @@ function renderAllSections(){
   // About You
   renderRadioGroup('rg-ay-lang', 'lang', LANG_OPTIONS);
   renderRadioGroup('rg-ay-role', 'ay_role', ROLE_OPTIONS, o => o.l);
-  renderRadioGroup('rg-ay-reviewed', 'reviewed', ['Yes','No']);
+  renderRadioGroup('rg-ay-reviewed', 'reviewed', REVIEWED_OPTIONS);
 
   // SRL
   renderScale7Block('srlWrap', SRL_ITEMS.map(([k,l]) => [k,l]));
@@ -824,7 +877,7 @@ function buildStudyPages(){
     }).join('');
 
     slotEl.innerHTML = `
-      <div class="section-label"><div class="section-title">Study ${i+1} of 3</div></div>
+      <div class="section-label"><div class="section-title">Study ${i+1} of 2</div></div>
       <div class="study-grid">
         <div class="paper-pane" id="paperPane-${paperId}">
           <div class="pdf-render-wrap" id="pdfWrap-${paperId}"><p class="pdf-status-msg">Loading paper…</p></div>
@@ -843,6 +896,7 @@ function buildStudyPages(){
           <div class="tab-content ai-only" data-tab="ai" id="aiTab-${paperId}">
             <div class="ai-chat-pane">
               <div class="ai-messages" id="aiMessages-${paperId}"></div>
+              <div class="q-sublabel" id="aiRemaining-${paperId}" style="padding:0 12px 6px;margin:0;"></div>
               <div class="ai-input-row">
                 <textarea id="aiInput-${paperId}" placeholder="Ask the AI assistant about this study..." onkeydown="handleAIInputKeydown(event,'${paperId}')"></textarea>
                 <button class="btn-ask-ai" id="aiSendBtn-${paperId}" onclick="sendAIMessage('${paperId}')">Send</button>
@@ -853,6 +907,7 @@ function buildStudyPages(){
       </div>`;
 
     STUDY_PDF_QUEUE[paperId] = { url: paper.pdfFile, containerId: 'pdfWrap-' + paperId, rendered:false };
+    if (isAI) updateAiRemainingUI(paperId);
   });
   attachLoggingListeners();
 }
@@ -868,16 +923,27 @@ function renderStudyPdfIfNeeded(paperId){
   const entry = STUDY_PDF_QUEUE[paperId];
   if (!entry || entry.rendered) return;
   entry.rendered = true;
-  renderPDF(entry.url, entry.containerId);
+  renderPDF(entry.url, entry.containerId, paperId);
 }
 
-async function renderPDF(url, containerId){
+// Per-paperId cache of page images (JPEG data URLs) captured straight from
+// the same pdf.js canvases used for on-screen rendering, so the AI assistant
+// can be given a real look at figures/tables rather than only extracted text.
+// Capped both in page count and resolution to keep the /api/chat payload
+// reasonably small (vision models charge/limit by image size, and we don't
+// want a 40-page PDF ballooning every chat request).
+let STUDY_PDF_IMAGES = {};
+const MAX_AI_VISION_PAGES = 8;
+const AI_VISION_MAX_DIMENSION = 1100; // px, longest side, before JPEG re-encode
+
+async function renderPDF(url, containerId, paperId){
   const container = document.getElementById(containerId);
   if (!container) return;
   try {
     const pdf = await pdfjsLib.getDocument(url).promise;
     container.innerHTML = '';
     const dpr = window.devicePixelRatio || 1;
+    const capturedImages = [];
     for (let pageNum=1; pageNum<=pdf.numPages; pageNum++){
       const page = await pdf.getPage(pageNum);
       const viewport = page.getViewport({ scale: 1 });
@@ -891,23 +957,90 @@ async function renderPDF(url, containerId){
       const ctx = canvas.getContext('2d');
       await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
       container.appendChild(canvas);
+
+      if (paperId && capturedImages.length < MAX_AI_VISION_PAGES){
+        try {
+          capturedImages.push(downscaleCanvasToJpeg(canvas, AI_VISION_MAX_DIMENSION));
+        } catch (captureErr){
+          console.error('Could not capture page image for AI vision', paperId, pageNum, captureErr);
+        }
+      }
     }
+    if (paperId) STUDY_PDF_IMAGES[paperId] = capturedImages;
   } catch (err){
     console.error('PDF render failed for', url, err);
     container.innerHTML = '<p class="pdf-status-msg">Could not load the paper. Please contact the study team.</p>';
   }
 }
 
+// Re-draws an already-rendered page canvas at a smaller resolution and
+// returns a JPEG data URL. Keeps the on-screen canvas at full
+// (device-pixel-ratio-scaled) resolution for readability while sending the
+// AI assistant a much lighter copy.
+function downscaleCanvasToJpeg(sourceCanvas, maxDimension){
+  const longestSide = Math.max(sourceCanvas.width, sourceCanvas.height);
+  const ratio = longestSide > maxDimension ? (maxDimension / longestSide) : 1;
+  const outW = Math.max(1, Math.round(sourceCanvas.width * ratio));
+  const outH = Math.max(1, Math.round(sourceCanvas.height * ratio));
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = outW;
+  outCanvas.height = outH;
+  outCanvas.getContext('2d').drawImage(sourceCanvas, 0, 0, outW, outH);
+  return outCanvas.toDataURL('image/jpeg', 0.72);
+}
+
+function getStudyPdfImages(paperId){
+  return STUDY_PDF_IMAGES[paperId] || [];
+}
+
 // ---------- AI chat panel ----------
 function switchWorkspaceTab(paperId, tab){
-  document.querySelectorAll(`#page-study-1 .tab-btn, #page-study-2 .tab-btn, #page-study-3 .tab-btn`).forEach(()=>{});
   const scope = document.getElementById('paperPane-' + paperId)?.closest('.study-page') || document;
   scope.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === tab));
   scope.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.getAttribute('data-tab') === tab));
   if (tab === 'ai'){
     renderAIMessages(paperId);
     document.querySelectorAll('.ai-tab-btn').forEach(b => { b.classList.remove('attention'); b.querySelector('.tab-badge')?.remove(); });
+    recordAiTabOpened(paperId);
+    updateAiRemainingUI(paperId);
   }
+}
+
+const MAX_AI_MESSAGES_PER_PAPER = 5;
+
+function getAiAggregate(paperId){
+  if (!DATA.ai_paper_aggregates[paperId]){
+    DATA.ai_paper_aggregates[paperId] = {
+      tab_opened: false, first_open_ts: null, time_to_first_open_ms: null,
+      time_to_first_message_ms: null, total_messages: 0, successful_messages: 0,
+      limit_reached: false
+    };
+  }
+  return DATA.ai_paper_aggregates[paperId];
+}
+
+function recordAiTabOpened(paperId){
+  const agg = getAiAggregate(paperId);
+  if (agg.tab_opened) return; // only the first open counts
+  agg.tab_opened = true;
+  agg.first_open_ts = nowTs();
+  const startTs = DATA.timing[paperId] && DATA.timing[paperId].study_start_ts;
+  if (startTs) agg.time_to_first_open_ms = agg.first_open_ts - startTs;
+}
+
+function updateAiRemainingUI(paperId){
+  const agg = getAiAggregate(paperId);
+  const remaining = Math.max(0, MAX_AI_MESSAGES_PER_PAPER - agg.successful_messages);
+  const note = document.getElementById('aiRemaining-' + paperId);
+  if (note) note.textContent = remaining > 0
+    ? remaining + ' of ' + MAX_AI_MESSAGES_PER_PAPER + ' messages remaining'
+    : 'You have reached the 5-message limit for this paper.';
+  const input = document.getElementById('aiInput-' + paperId);
+  const sendBtn = document.getElementById('aiSendBtn-' + paperId);
+  const limitReached = remaining <= 0;
+  agg.limit_reached = limitReached;
+  if (input) input.disabled = limitReached;
+  if (sendBtn) sendBtn.disabled = limitReached;
 }
 
 function renderAIMessages(paperId){
@@ -977,6 +1110,7 @@ async function callBackendChat(paperId, userMessage){
       paper_id: paperId,
       study_title: PAPERS[paperId].title,
       study_text: getPlainStudyText(paperId),
+      study_images: getStudyPdfImages(paperId),
       user_message: userMessage,
       conversation_history: DATA.ai_chats[paperId]
     })
@@ -1000,6 +1134,8 @@ function handleAIInputKeydown(e, paperId){
 
 async function sendAIMessage(paperId){
   if (aiSendInFlight[paperId]) return; // prevent duplicate requests (Send click or repeated Enter)
+  const agg = getAiAggregate(paperId);
+  if (agg.successful_messages >= MAX_AI_MESSAGES_PER_PAPER) return; // 5-message cap reached; input should already be disabled
   const input = document.getElementById('aiInput-' + paperId);
   const sendBtn = document.getElementById('aiSendBtn-' + paperId);
   const messagesContainer = document.getElementById('aiMessages-' + paperId);
@@ -1010,11 +1146,15 @@ async function sendAIMessage(paperId){
   if (sendBtn){ sendBtn.disabled = true; sendBtn.textContent = 'Thinking…'; }
   if (input) input.disabled = true;
 
+  const sendStartTs = nowTs();
+  agg.total_messages++;
   DATA.ai_chats[paperId].push({ role:'user', content:text, ts: nowIso() });
   if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
   if (!DATA.timing[paperId].first_ai_message_ts){
     DATA.timing[paperId].first_ai_message_ts = nowTs();
     DATA.timing[paperId].first_ai_message_iso = nowIso();
+    const startTs = DATA.timing[paperId].study_start_ts;
+    if (startTs) agg.time_to_first_message_ms = DATA.timing[paperId].first_ai_message_ts - startTs;
   }
   input.value = '';
   renderAIMessages(paperId); // shows the participant's message immediately
@@ -1023,16 +1163,40 @@ async function sendAIMessage(paperId){
   // below can only ever remove this exact node for this exact paperId.
   const thinkingEl = createThinkingMessage(paperId, messagesContainer);
 
+  let success = false;
+  let errorType = null;
+  let reply = null;
   try {
-    const reply = await callBackendChat(paperId, text);
+    reply = await callBackendChat(paperId, text);
     // Remove the temporary indicator BEFORE the real reply is stored/rendered.
     removeThinkingMessage(paperId);
     DATA.ai_chats[paperId].push({ role:'assistant', content: reply, ts: nowIso() });
+    success = true;
   } catch (err){
     console.error('AI chat error for', paperId, err); // detailed error stays in the console only
+    errorType = (err && err.message) || 'unknown_error';
     removeThinkingMessage(paperId);
-    DATA.ai_chats[paperId].push({ role:'assistant', content:'The assistant could not respond right now. Please try again.', ts: nowIso() });
+    reply = 'The assistant could not respond right now. Please try again.';
+    DATA.ai_chats[paperId].push({ role:'assistant', content: reply, ts: nowIso() });
   } finally {
+    const sendEndTs = nowTs();
+    // Only successful submissions count against the 5-message cap, per spec.
+    if (success) agg.successful_messages++;
+    DATA.ai_message_log.push({
+      participant_id: DATA.participant_id,
+      paper_id: paperId,
+      paper_order_position: DATA.study_order.indexOf(paperId) + 1,
+      message_number: agg.total_messages,
+      prompt: text,
+      response: success ? reply : null,
+      submit_ts_iso: new Date(sendStartTs).toISOString(),
+      complete_ts_iso: new Date(sendEndTs).toISOString(),
+      latency_ms: sendEndTs - sendStartTs,
+      success,
+      error_type: errorType,
+      messages_remaining: Math.max(0, MAX_AI_MESSAGES_PER_PAPER - agg.successful_messages)
+    });
+
     // Extra safeguard in case it was somehow not removed above (e.g. a thrown
     // error before either branch ran). Cleanup always happens here regardless
     // of success or failure, and runs BEFORE the in-flight flag is cleared so
@@ -1042,9 +1206,9 @@ async function sendAIMessage(paperId){
 
     renderAIMessages(paperId);
     aiSendInFlight[paperId] = false;
-    if (sendBtn){ sendBtn.disabled = false; sendBtn.textContent = 'Send'; }
-    if (input) input.disabled = false;
-    input && input.focus();
+    if (sendBtn) sendBtn.textContent = 'Send';
+    updateAiRemainingUI(paperId); // re-enables (or permanently disables at the cap) input/button
+    input && !input.disabled && input.focus();
   }
 }
 
@@ -1073,14 +1237,29 @@ function violationMessage(type){
 
 function logViolation(type){
   DATA.violations.push({ type, ts: nowIso(), paper_id: currentStudyPaperId });
+  logBehavioralEvent(type);
   showWarnBanner(violationMessage(type));
 }
 
+// General-purpose behavioral event log (fullscreen enter/exit/re-entry,
+// visibility change, window blur/focus). Kept separate from DATA.violations
+// (which only records the negative/warning-worthy events) so both the
+// existing violations-based logic and the new spec's broader behavioral
+// event log have what they each expect.
+function logBehavioralEvent(type){
+  DATA.behavioral_events.push({ participant_id: DATA.participant_id, paper_id: currentStudyPaperId, type, ts: nowIso() });
+}
+
 document.addEventListener('visibilitychange', () => {
-  if (inTaskPhase && document.hidden) logViolation('visibility');
+  if (!inTaskPhase) return;
+  if (document.hidden) logViolation('visibility');
+  else logBehavioralEvent('visibility_visible');
 });
 window.addEventListener('blur', () => {
   if (inTaskPhase) logViolation('blur');
+});
+window.addEventListener('focus', () => {
+  if (inTaskPhase) logBehavioralEvent('focus');
 });
 document.addEventListener('fullscreenchange', () => {
   if (inTaskPhase){
@@ -1088,6 +1267,7 @@ document.addEventListener('fullscreenchange', () => {
       logViolation('fullscreen_exit');
       showFullscreenRequiredOverlay();
     } else {
+      logBehavioralEvent('fullscreen_enter');
       hideFullscreenRequiredOverlay();
     }
   }
@@ -1117,6 +1297,7 @@ function enterFullscreenAndStart(){
     req.call(el).then(() => {
       DATA.fullscreen_used = true;
       inTaskPhase = true;
+      logBehavioralEvent('fullscreen_enter');
       hideFullscreenRequiredOverlay();
     }).catch(() => {
       inTaskPhase = true;
@@ -1127,17 +1308,63 @@ function enterFullscreenAndStart(){
 }
 
 // ---------- Behavioral logging ----------
+// Substantial-revision detection: rather than logging every keystroke, we
+// only log when a pause of >=2s follows a change that deleted or replaced
+// >=20 characters since the last logged (or initial) snapshot. A simple
+// common-prefix/common-suffix diff against the snapshot is enough to
+// estimate chars-deleted vs. chars-inserted without a full diff library.
+const SUBSTANTIAL_REVISION_MIN_CHARS = 20;
+const SUBSTANTIAL_REVISION_PAUSE_MS = 2000;
+
+function diffCounts(oldVal, newVal){
+  let prefix = 0;
+  const maxPrefix = Math.min(oldVal.length, newVal.length);
+  while (prefix < maxPrefix && oldVal[prefix] === newVal[prefix]) prefix++;
+  let oldEnd = oldVal.length, newEnd = newVal.length;
+  while (oldEnd > prefix && newEnd > prefix && oldVal[oldEnd-1] === newVal[newEnd-1]){ oldEnd--; newEnd--; }
+  const charsDeleted = Math.max(0, oldEnd - prefix);
+  const charsInserted = Math.max(0, newEnd - prefix);
+  return { charsDeleted, charsInserted };
+}
+
+function fieldIdToPaperId(fieldId){
+  const match = PAPER_IDS.find(pid => fieldId === pid || fieldId.startsWith(pid + '_'));
+  return match || null;
+}
+
 function attachLoggingListeners(){
   document.querySelectorAll('textarea[data-logfield]').forEach(ta => {
     const id = ta.getAttribute('data-logfield');
     if (ta._loggingAttached) return;
     ta._loggingAttached = true;
     if (!DATA.logs[id]) DATA.logs[id] = { keystrokes:0, pastes:0, drafts:[] };
+    ta._revisionSnapshot = ta.value || '';
     ta.addEventListener('keydown', () => { DATA.logs[id].keystrokes++; });
     ta.addEventListener('paste', (e) => {
       DATA.logs[id].pastes++;
       const pasted = (e.clipboardData || window.clipboardData).getData('text');
       DATA.paste_events.push({ field:id, ts: nowIso(), length: pasted.length });
+    });
+    ta.addEventListener('input', () => {
+      clearTimeout(ta._revisionTimer);
+      ta._revisionTimer = setTimeout(() => {
+        const before = ta._revisionSnapshot;
+        const after = ta.value || '';
+        const { charsDeleted, charsInserted } = diffCounts(before, after);
+        if (charsDeleted >= SUBSTANTIAL_REVISION_MIN_CHARS){
+          DATA.revision_log.push({
+            participant_id: DATA.participant_id,
+            paper_id: fieldIdToPaperId(id),
+            question_id: id,
+            ts: nowIso(),
+            chars_deleted: charsDeleted,
+            chars_inserted: charsInserted,
+            response_length_before: before.length,
+            response_length_after: after.length
+          });
+        }
+        ta._revisionSnapshot = after;
+      }, SUBSTANTIAL_REVISION_PAUSE_MS);
     });
     ta.addEventListener('blur', () => {
       DATA.logs[id].drafts.push({ ts: nowIso(), value: ta.value });
@@ -1167,10 +1394,39 @@ function prepareReflectionsPage(){
   buildPaperScaleRows('confWrap', 'confidence');
   buildPaperScaleRows('understandWrap', 'understood');
   if (DATA.condition === 'AI'){
-    renderRadioGroup('engageWrap', 'ai_engagement', ENGAGEMENT_OPTIONS, o => o.l, 'checkbox');
-    renderScale7Block('whoseThinkingWrap', [['whose_thinking', '']]);
-    document.querySelectorAll('#whoseThinkingWrap .likert-statement').forEach(el => el.style.display = 'none');
+    buildPerPaperAiReflections();
   }
+}
+
+// Per-paper AI-engagement (multi-select) + ownership (1-7 scale) blocks, one
+// pair per assigned paper, with the paper's title in the heading so
+// participants aren't asked one ambiguous "overall" question across both
+// papers. Field names are paper-scoped (ai_engagement_<paperId>,
+// whose_thinking_<paperId>) so collectFieldsNow()'s generic name-based
+// collection picks each one up separately.
+function buildPerPaperAiReflections(){
+  const wrap = document.getElementById('perPaperAiReflectionsWrap');
+  if (!wrap) return;
+  wrap.innerHTML = DATA.study_order.map((paperId, i) => {
+    const engageName = 'ai_engagement_' + paperId;
+    const wtName = 'whose_thinking_' + paperId;
+    return `<div class="q-card">
+      <div class="q-label">Paper ${i+1}: ${escapeHtml(PAPERS[paperId].title)} — How did you engage with the AI assistant while working on this paper? Select all that apply.</div>
+      <div class="options-grid" id="engageWrap-${paperId}"></div>
+    </div>
+    <div class="q-card">
+      <div class="q-label">For Paper ${i+1} (${escapeHtml(PAPERS[paperId].title)}), whose thinking is reflected in your responses?</div>
+      <div class="q-sublabel">1 = Mostly AI's thinking, 7 = Mostly my thinking</div>
+      <div class="conf-scale" data-name="${wtName}">${(function(){
+        let btns = '';
+        for (let v=1; v<=7; v++){ btns += `<button type="button" class="conf-btn" data-name="${wtName}" data-val="${v}" onclick="selectConvincing(this)">${v}</button>`; }
+        return btns;
+      })()}</div>
+    </div>`;
+  }).join('');
+  DATA.study_order.forEach(paperId => {
+    renderRadioGroup('engageWrap-' + paperId, 'ai_engagement_' + paperId, ENGAGEMENT_OPTIONS, o => o.l, 'checkbox');
+  });
 }
 
 // Exclusive-checkbox handling + selected-state styling
@@ -1183,16 +1439,16 @@ document.addEventListener('change', (e) => {
       item.classList.add('selected');
     } else {
       item.classList.toggle('selected', t.checked);
-      if (t.name === 'ai_engagement'){
+      if (t.name.startsWith('ai_engagement')){
         const opt = ENGAGEMENT_OPTIONS.find(o => o.l === t.value);
         const exclusiveVals = ENGAGEMENT_OPTIONS.filter(o => o.exclusive).map(o => o.l);
         if (t.checked){
           if (opt && opt.exclusive){
-            document.querySelectorAll(`input[name="ai_engagement"]`).forEach(inp => {
+            document.querySelectorAll(`input[name="${t.name}"]`).forEach(inp => {
               if (inp !== t){ inp.checked = false; inp.closest('.option-item')?.classList.remove('selected'); }
             });
           } else {
-            document.querySelectorAll(`input[name="ai_engagement"]`).forEach(inp => {
+            document.querySelectorAll(`input[name="${t.name}"]`).forEach(inp => {
               if (exclusiveVals.includes(inp.value)){ inp.checked = false; inp.closest('.option-item')?.classList.remove('selected'); }
             });
           }
@@ -1277,10 +1533,20 @@ function flattenForExport(){
     prolific_id: DATA.prolific_id,
     session_start_iso: DATA.session_start_iso,
     session_end_iso: DATA.session_end_iso,
+    final_submission_timestamp: DATA.final_submission_timestamp,
+    completion_status: DATA.completion_status,
+    consent_status: DATA.consent_status,
+    media_release_status: DATA.media_release_status,
+    screening_exit_reason: DATA.screening_exit_reason,
     expertise_tier: DATA.expertise_tier,
+    research_expertise_stratum: DATA.research_expertise_stratum,
     condition: DATA.condition,
+    ai_condition: DATA.ai_condition,
     ct_scale_placement: DATA.ct_scale_placement,
+    critical_thinking_placement: DATA.critical_thinking_placement,
     study_order: DATA.study_order.join(','),
+    paper_order: DATA.paper_order.join(','),
+    unassigned_paper_id: DATA.unassigned_paper_id,
     quiz_score: DATA.quiz_score,
     quiz_total: DATA.quiz_total,
     fullscreen_used: DATA.fullscreen_used,
@@ -1288,11 +1554,16 @@ function flattenForExport(){
   };
   DATA.study_order.forEach((paperId, i) => {
     const t = DATA.timing[paperId] || {};
+    const agg = DATA.ai_paper_aggregates[paperId] || {};
     flat['study_' + (i+1) + '_id'] = paperId;
     flat['study_' + (i+1) + '_title'] = PAPERS[paperId].title;
     flat['study_' + (i+1) + '_duration_ms'] = t.duration_ms || '';
     flat['study_' + (i+1) + '_ai_turns'] = DATA.ai_chats[paperId].filter(m => m.role==='user').length;
     flat['study_' + (i+1) + '_ai_transcript'] = JSON.stringify(DATA.ai_chats[paperId]);
+    flat['study_' + (i+1) + '_ai_tab_opened'] = agg.tab_opened || false;
+    flat['study_' + (i+1) + '_ai_time_to_first_open_ms'] = agg.time_to_first_open_ms || '';
+    flat['study_' + (i+1) + '_ai_time_to_first_message_ms'] = agg.time_to_first_message_ms || '';
+    flat['study_' + (i+1) + '_ai_limit_reached'] = agg.limit_reached || false;
   });
   Object.assign(flat, DATA.responses);
   return flat;
@@ -1353,6 +1624,8 @@ function finalizeSubmission(){
   collectFieldsNow();
   finishQuiz();
   DATA.session_end_iso = nowIso();
+  DATA.completion_status = 'completed';
+  DATA.final_submission_timestamp = nowIso();
   submitToServer();
   currentIdx = pageOrder.indexOf('page-debrief');
   showPage('page-debrief');

@@ -6,6 +6,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
@@ -34,7 +35,11 @@ if (!OPENAI_API_KEY) {
 }
 
 // ---------- Security middleware ----------
-app.use(express.json({ limit: '256kb' }));
+// Raised from 256kb: requests may now include downscaled JPEG page images
+// (see MAX_VISION_IMAGES / MAX_IMAGE_DATA_URL_LEN below) so the assistant can
+// see figures/tables, not just extracted text. Still well under typical
+// reverse-proxy/body-size defaults.
+app.use(express.json({ limit: '12mb' }));
 
 const corsOptions = ALLOWED_ORIGIN
   ? { origin: ALLOWED_ORIGIN }
@@ -63,9 +68,19 @@ const MAX_USER_MESSAGE_LEN = 4000;
 const MAX_STUDY_TEXT_LEN = 60000;
 const MAX_HISTORY_TURNS = 40;
 const MAX_HISTORY_MSG_LEN = 4000;
+const MAX_VISION_IMAGES = 8; // matches MAX_AI_VISION_PAGES in the frontend
+const MAX_USER_TURNS_PER_PAPER = 5; // matches MAX_AI_MESSAGES_PER_PAPER in the frontend
+const MAX_IMAGE_DATA_URL_LEN = 1500000; // ~1.5MB per data URL, generous for a downscaled JPEG
 
 function isNonEmptyString(v) {
   return typeof v === 'string' && v.trim().length > 0;
+}
+
+function isValidImageDataUrl(v) {
+  return typeof v === 'string' &&
+    v.length > 0 &&
+    v.length <= MAX_IMAGE_DATA_URL_LEN &&
+    /^data:image\/(jpeg|jpg|png);base64,/.test(v);
 }
 
 // ---------- POST /api/chat ----------
@@ -77,6 +92,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       paper_id,
       study_title,
       study_text,
+      study_images,
       user_message,
       conversation_history
     } = req.body || {};
@@ -94,6 +110,21 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Invalid conversation history.' });
     }
 
+    // study_images is optional (older clients / failed PDF renders won't send
+    // it); when present it must be a small array of well-formed JPEG/PNG
+    // data URLs — these came from the participant's own browser canvas, not
+    // a trusted source, so validate shape/size before ever forwarding them.
+    let images = [];
+    if (study_images !== undefined) {
+      if (!Array.isArray(study_images) || study_images.length > MAX_VISION_IMAGES) {
+        return res.status(400).json({ error: 'Invalid study images.' });
+      }
+      if (!study_images.every(isValidImageDataUrl)) {
+        return res.status(400).json({ error: 'Invalid study images.' });
+      }
+      images = study_images;
+    }
+
     // Size limits
     if (user_message.length > MAX_USER_MESSAGE_LEN) {
       return res.status(400).json({ error: 'Message is too long.' });
@@ -103,6 +134,15 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     }
     if (conversation_history.length > MAX_HISTORY_TURNS) {
       return res.status(400).json({ error: 'Conversation history is too long.' });
+    }
+    // Defense-in-depth for the spec's 5-message-per-paper cap: the frontend
+    // already disables the input/button once the cap is reached, but a
+    // participant could in principle replay a request, so re-derive the
+    // count server-side from the conversation history rather than trusting
+    // a client-supplied counter.
+    const priorUserTurns = conversation_history.filter(t => t && t.role === 'user').length;
+    if (priorUserTurns >= MAX_USER_TURNS_PER_PAPER) {
+      return res.status(429).json({ error: 'Message limit reached for this paper.' });
     }
     for (const turn of conversation_history) {
       if (!turn || typeof turn.content !== 'string' || turn.content.length > MAX_HISTORY_MSG_LEN) {
@@ -116,9 +156,17 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     }
 
     const systemPrompt =
-      'You are a normal helpful AI assistant. The participant is working with the study provided below. ' +
-      'Use the study title and text as context when answering questions about it. Do not invent details about the study. ' +
-      'Follow normal safety requirements.\n\n' +
+      'You are a helpful assistant supporting a user who is evaluating a research study. ' +
+      'The full text of the study is provided in this conversation, and for the current question you may also ' +
+      'be shown images of the study\'s pages so you can read figures, tables, and other visual elements directly. ' +
+      'Answer the user\'s question using only the supplied study (text and/or images) and sound general reasoning; ' +
+      'if the study does not contain enough information to answer, say so rather than speculating. ' +
+      'The supplied text may not fully capture figures, tables, or other visual elements of the study; if no page ' +
+      'images were provided and a question depends on such content, say so explicitly rather than guessing. ' +
+      'Do not reference studies outside this task. ' +
+      'Keep each response under about 200 words and make sure it is complete and self-contained within that limit. ' +
+      'If needed, narrow the scope of your answer rather than running long. ' +
+      'Do not provide content that would facilitate harm or illegal activity; if a request cannot be answered safely, briefly note why.\n\n' +
       'Study title: ' + study_title + '\n\n' +
       'Study text:\n' + study_text;
 
@@ -127,7 +175,20 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
       const role = turn.role === 'assistant' ? 'assistant' : 'user';
       messages.push({ role, content: String(turn.content) });
     });
-    messages.push({ role: 'user', content: user_message });
+
+    // Attach page images (if any) to this turn's user message only — they're
+    // sent fresh on every request since Chat Completions has no server-side
+    // session state, but only the current message needs them; the
+    // conversation_history above stays text-only.
+    if (images.length > 0) {
+      const content = [{ type: 'text', text: user_message }];
+      images.forEach(dataUrl => {
+        content.push({ type: 'image_url', image_url: { url: dataUrl } });
+      });
+      messages.push({ role: 'user', content });
+    } else {
+      messages.push({ role: 'user', content: user_message });
+    }
 
     const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -166,12 +227,40 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
   }
 });
 
-// ---------- Future secure submission endpoint ----------
-// TODO: implement a real /api/submit-survey endpoint here that persists
-// the full survey DATA object (participant_id, responses, ai_chats, timing,
-// violations, quiz_score, etc.) to a database or file store. The frontend
-// already POSTs the full DATA object to this path; for now it is a stub
-// that 404s and the client logs a console.warn on failure.
+// ---------- Submission persistence ----------
+// Simple append-only file store: each participant's full DATA object is
+// written as one line of JSON to data/submissions.jsonl. This is a pragmatic
+// minimum (not a database) so that participant data survives even if the
+// browser's localStorage is cleared or the export panel is never opened —
+// swap this for a real database later without changing the frontend, since
+// the frontend already just POSTs the whole DATA object to this path.
+const DATA_DIR = path.join(__dirname, 'data');
+const SUBMISSIONS_FILE = path.join(DATA_DIR, 'submissions.jsonl');
+const MAX_SUBMISSION_BODY_LEN = 5_000_000; // ~5MB, generous for a full participant record incl. AI transcripts
+
+function ensureDataDir() {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { /* already exists */ }
+}
+
+app.post('/api/submit-survey', (req, res) => {
+  try {
+    const body = req.body;
+    if (!body || typeof body !== 'object' || !isNonEmptyString(body.participant_id)) {
+      return res.status(400).json({ error: 'Invalid submission.' });
+    }
+    const serialized = JSON.stringify(body);
+    if (serialized.length > MAX_SUBMISSION_BODY_LEN) {
+      return res.status(400).json({ error: 'Submission too large.' });
+    }
+    ensureDataDir();
+    fs.appendFileSync(SUBMISSIONS_FILE, serialized + '\n', 'utf8');
+    console.log('[api/submit-survey] stored submission for', body.participant_id);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[api/submit-survey] Unexpected error', err);
+    return res.status(500).json({ error: 'Could not store submission.' });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);

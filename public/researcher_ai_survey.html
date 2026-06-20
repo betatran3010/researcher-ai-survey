@@ -524,7 +524,7 @@ body.condition-ai .noai-only{display:none!important;}
     <div class="q-label">What is your field or area of research?</div><input type="text" id="ay_field" placeholder="Describe in your own words">
   </div>
   <div class="q-card">
-    <div class="q-label">Have you ever reviewed a paper for a journal or conference?</div>
+    <div class="q-label">Approximately how many papers have you formally reviewed for a journal or conference?</div>
     <div class="options-grid" id="rg-ay-reviewed"></div>
   </div>
 </div>
@@ -588,10 +588,9 @@ body.condition-ai .noai-only{display:none!important;}
   </div>
 </div>
 
-<!-- ============ STUDY SLOTS (filled dynamically) ============ -->
+<!-- ============ STUDY SLOTS (filled dynamically; participants see 2 of the 3 pool papers) ============ -->
 <div class="page study-page" id="page-study-1"></div>
 <div class="page study-page" id="page-study-2"></div>
-<div class="page study-page" id="page-study-3"></div>
 
 <!-- ============ 6. FINAL REFLECTIONS ============ -->
 <div class="page survey-page" id="page-reflections">
@@ -606,15 +605,7 @@ body.condition-ai .noai-only{display:none!important;}
     <div class="q-sublabel">1 = Not at all well, 7 = Very well</div>
     <div id="understandWrap"></div>
   </div>
-  <div class="q-card ai-only">
-    <div class="q-label">How did you engage with the AI assistant during this task? Select all that apply.</div>
-    <div class="options-grid" id="engageWrap"></div>
-  </div>
-  <div class="q-card ai-only">
-    <div class="q-label">Overall, whose thinking is reflected in your responses?</div>
-    <div class="q-sublabel">1 = Mostly AI's thinking, 7 = Mostly my thinking</div>
-    <div id="whoseThinkingWrap"></div>
-  </div>
+  <div class="ai-only" id="perPaperAiReflectionsWrap"></div>
 </div>
 
 <!-- ============ QUIZ TRANSITION ============ -->
