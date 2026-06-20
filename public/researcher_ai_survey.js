@@ -611,6 +611,7 @@ async function requestAssignmentWithUI() {
   try {
     await assignConditionAndOrder(pendingAssignmentRole);
     setAssignmentStatus('hidden');
+    if (btnNext) btnNext.disabled = false;
     return true;
   } catch (err) {
     console.error('[requestAssignmentWithUI] /api/assign-condition failed:', err);
