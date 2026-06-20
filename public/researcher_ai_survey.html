@@ -63,7 +63,7 @@ input[type="text"]:focus,input[type="number"]:focus{outline:none;border-color:va
    reuse the same .option-item/.option-dot markup as radio items, but should
    look like a standard checkbox (square, checkmark) rather than a radio
    button (circle, filled dot) so the UI signals multi-select at a glance. */
-.option-item input[type="checkbox"] + .option-dot{border-radius:5px;}
+.option-item input[type="checkbox"] + .option-dot{border-radius:0;}
 .option-item input[type="checkbox"] + .option-dot::after{width:auto;height:auto;border-radius:0;background:none;content:'✓';color:var(--terra);font-size:13px;font-weight:700;line-height:1;}
 .option-item.selected input[type="checkbox"] + .option-dot::after{display:block;}
 .option-text{font-size:1rem;line-height:1.5;color:var(--text);}
@@ -77,9 +77,58 @@ input[type="text"]:focus,input[type="number"]:focus{outline:none;border-color:va
 .likert-end{font-size:.75rem;color:var(--warm-gray);}
 .conf-row{display:flex;align-items:center;gap:14px;margin:0 0 16px;flex-wrap:wrap;}
 .conf-label{font-size:.87rem;color:var(--text-light);min-width:180px;flex:1;}
-.conf-scale{display:flex;gap:5px;}
-.conf-btn{width:36px;height:36px;border-radius:8px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:.8rem;font-weight:600;color:var(--text-light);transition:all .15s;display:flex;align-items:center;justify-content:center;}
+.conf-scale{
+  display:flex;
+  gap:8px;
+  width:100%;
+}
+
+.conf-btn{
+  flex:1;
+  width:auto;
+  min-width:0;
+  height:40px;
+  border-radius:8px;
+  border:1.5px solid var(--border);
+  background:#fff;
+  cursor:pointer;
+  font-size:.8rem;
+  font-weight:600;
+  color:var(--text-light);
+  transition:all .15s;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
 .conf-btn.selected{background:var(--navy);border-color:var(--navy);color:#fff;}
+.scale-ends{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:16px;
+  width:100%;
+  margin-top:6px;
+}
+
+.scale-end{
+  font-size:.75rem;
+  color:var(--warm-gray);
+  line-height:1.35;
+  flex:1;
+}
+
+.scale-end:first-child{
+  text-align:left;
+}
+
+.scale-end.right{
+  text-align:right;
+}
+
+.conf-scale + .scale-ends{
+  width:100%;
+  max-width:none;
+}
 .slider-block{margin-bottom:30px;padding-bottom:30px;border-bottom:1px solid var(--border);}
 .slider-block:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}
 .slider-q{font-size:.9rem;font-weight:600;color:var(--navy-light);margin-bottom:14px;}
@@ -151,7 +200,7 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;hei
 .instructions-mockup .mockup-block + .mockup-block{margin-top:18px;}
 .instructions-title{font-family:'Inter',sans-serif;font-size:1.2rem;font-weight:700;color:var(--navy);margin-bottom:16px;}
 .instructions-bullets{margin:0 0 14px;padding-left:22px;}
-.instructions-bullets li{margin-bottom:8px;line-height:1.55;}
+.instructions-bullets li{margin-bottom:8px; font-size:0.93rem; font-weight:400; line-height:1.65;}
 /* Quiz transition pages (buildQuizPages() in researcher_ai_survey.js) — a
    brief, centered "You will next answer questions about: <title>" screen
    shown between the two papers' quiz blocks. More specific than the shared
@@ -193,6 +242,20 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;hei
 .warn-banner{position:fixed;top:8px;left:50%;transform:translateX(-50%);background:#fdf2e3;border:1.5px solid var(--warn);color:#7a5400;padding:10px 18px;border-radius:10px;font-size:.87rem;z-index:200;display:none;max-width:520px;text-align:center;}
 .hidden{display:none!important;}
 body.condition-noai .ai-only{display:none!important;}
+/* In the No-AI condition, make the Questions tab span the full workspace width */
+body.condition-noai .workspace-head{
+  width:100%;
+}
+
+body.condition-noai .workspace-tabs{
+  width:100%;
+}
+
+body.condition-noai .tab-btn[data-tab="questions"]{
+  width:100%;
+  flex:1;
+  justify-content:center;
+}
 body.condition-ai .noai-only{display:none!important;}
 .admin-overlay{position:fixed;inset:0;background:rgba(20,25,30,.92);z-index:500;display:none;overflow-y:auto;padding:40px 24px;}
 .admin-overlay.open{display:block;}
@@ -553,7 +616,6 @@ body.condition-ai .noai-only{display:none!important;}
 <div class="page survey-page" id="page-srl">
   <div class="section-label"><div class="section-number" id="secnum-srl">2</div><div class="section-title">How You Approach Research Work</div></div>
   <p class="muted" style="margin-bottom:16px;">Please indicate how well each statement describes the way you typically approach scholarly work related to research. Answer based on how you usually behave, not how you think you should behave. There are no right or wrong answers.</p>
-  <p class="q-sublabel" style="margin-top:0;">1 = Not at all true for me, 7 = Very true for me</p>
   <div class="q-card" id="srlWrap"></div>
 </div>
 
@@ -608,12 +670,10 @@ body.condition-ai .noai-only{display:none!important;}
   <div class="section-label"><div class="section-number" id="secnum-reflections">6</div><div class="section-title">Reflections</div></div>
   <div class="q-card">
     <div class="q-label">How confident are you in your responses for each study?</div>
-    <div class="q-sublabel">1 = Not at all confident, 7 = Completely confident</div>
     <div id="confWrap"></div>
   </div>
   <div class="q-card">
     <div class="q-label">How well do you feel you understood each study?</div>
-    <div class="q-sublabel">1 = Not at all well, 7 = Very well</div>
     <div id="understandWrap"></div>
   </div>
   <div class="ai-only" id="perPaperAiReflectionsWrap"></div>
@@ -636,9 +696,17 @@ body.condition-ai .noai-only{display:none!important;}
   <div class="section-label"><div class="section-number" id="secnum-debrief">8</div><div class="section-title">Debrief</div></div>
   <div class="q-card">
     <p>The purpose of this study is to understand how people evaluate research claims, reason about evidence, and, for some participants, with or without AI tools during scientific reasoning tasks. To study these processes fairly, we did not want participants' responses to depend on prior knowledge of a real topic, article, or research area. For that reason, the research articles you read were artificially constructed for this study and were not real published research papers. The findings, statistics, citations, and implications in the articles were included as part of the study materials and should not be treated as established scientific evidence or as advice for real-world decisions.</p>
-    <p><strong>Thank you very much for participating!</strong></p>
+    <p style="margin-top:16px;"><strong>Thank you very much for participating!</strong></p>
   </div>
   <div class="divider"></div>
+</div>
+
+<!-- ============ SUBMISSION CONFIRMATION ============ -->
+<div class="page survey-page" id="page-submitted">
+  <div class="exit-screen">
+    <h2>Your response has been submitted.</h2>
+    <p>Thank you very much for participating!</p>
+  </div>
 </div>
 
 <!-- ============ NAV (Back button intentionally omitted — navigation is forward-only) ============ -->

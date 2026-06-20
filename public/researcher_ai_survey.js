@@ -9,9 +9,9 @@ if (window.pdfjsLib) {
 }
 
 // ---------- Core state ----------
-function genId(){ return 'P-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,8); }
-function nowIso(){ return new Date().toISOString(); }
-function nowTs(){ return Date.now(); }
+function genId() { return 'P-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+function nowIso() { return new Date().toISOString(); }
+function nowTs() { return Date.now(); }
 
 const DATA = {
   participant_id: genId(),
@@ -46,8 +46,8 @@ const DATA = {
 
   responses: {},
   ai_chats: { font: [], food: [], listing: [] },
-  timing: { font:{}, food:{}, listing:{} },
-  ai_paper_aggregates: { font:{}, food:{}, listing:{} },
+  timing: { font: {}, food: {}, listing: {} },
+  ai_paper_aggregates: { font: {}, food: {}, listing: {} },
   ai_message_log: [],
   behavioral_events: [],
   revision_log: [],
@@ -64,30 +64,30 @@ const DATA = {
 
 // ---------- Option constants ----------
 const ROLE_OPTIONS = [
-  {l:'Undergraduate research assistant', tier:'lower'},
-  {l:'Post-baccalaureate research assistant or lab manager', tier:'lower'},
-  {l:"Master's student", tier:'lower'},
-  {l:'First-year PhD student', tier:'lower'},
-  {l:'Second-year PhD student', tier:'higher'},
-  {l:'Third-year PhD student', tier:'higher'},
-  {l:'Fourth-year PhD student', tier:'higher'},
-  {l:'Fifth-year or later PhD student', tier:'higher'},
-  {l:'Postdoctoral scholar', tier:'higher'}
+  { l: 'Undergraduate research assistant', tier: 'lower' },
+  { l: 'Post-baccalaureate research assistant or lab manager', tier: 'lower' },
+  { l: "Master's student", tier: 'lower' },
+  { l: 'First-year PhD student', tier: 'lower' },
+  { l: 'Second-year PhD student', tier: 'higher' },
+  { l: 'Third-year PhD student', tier: 'higher' },
+  { l: 'Fourth-year PhD student', tier: 'higher' },
+  { l: 'Fifth-year or later PhD student', tier: 'higher' },
+  { l: 'Postdoctoral scholar', tier: 'higher' }
 ];
 
 // Section 4, Q1 — "For which research-related purposes do you use AI
 // assistants? Select all that apply." (verbatim option list, spec section 4)
 const AI_PURPOSE_OPTIONS = [
-  {l:'Finding information or practical guidance'},
-  {l:'Understanding papers, methods, or concepts'},
-  {l:'Summarizing research materials'},
-  {l:'Brainstorming research questions, hypotheses, study designs, or other research ideas'},
-  {l:'Writing, editing, presentations, or research communication'},
-  {l:'Coding, mathematics, quantitative analysis, or other technical work'},
-  {l:'Interpreting results'},
-  {l:'Evaluating arguments, evidence, methods, or research designs'},
-  {l:'Talking through a research decision'},
-  {l:'Other', specify:true}
+  { l: 'Finding information or practical guidance' },
+  { l: 'Understanding papers, methods, or concepts' },
+  { l: 'Summarizing research materials' },
+  { l: 'Brainstorming research questions, hypotheses, study designs, or other research ideas' },
+  { l: 'Writing, editing, presentations, or research communication' },
+  { l: 'Coding, mathematics, quantitative analysis, or other technical work' },
+  { l: 'Interpreting results' },
+  { l: 'Evaluating arguments, evidence, methods, or research designs' },
+  { l: 'Talking through a research decision' },
+  { l: 'Other', specify: true }
 ];
 
 const TENURE_OPTIONS = [
@@ -100,39 +100,39 @@ const TENURE_OPTIONS = [
 
 // Section 4, Q4 sliders (verbatim left/right anchor text from spec)
 const SLIDERS = [
-  {key:'slider_role_balance', q:'When I use AI for research work, my role is...', left:'AI does the work, I use what it produces', right:'I do the work, AI at most assists my decisions'},
-  {key:'slider_dependence', q:'Over time, using AI has made me...', left:'More capable and independent on my own in research tasks', right:'More reliant on AI for research tasks I used to do myself'},
-  {key:'slider_origin', q:'When I use AI for research work, it feels like it is...', left:'Surfacing information that already exists', right:'Creating something new or creative'},
-  {key:'slider_personhood', q:'AI feels to me like...', left:'A neutral, impersonal instrument', right:'Something with its own point of view'}
+  { key: 'slider_role_balance', q: 'When I use AI for research work, my role is...', left: 'AI does the work, I use what it produces', right: 'I do the work, AI at most assists my decisions' },
+  { key: 'slider_dependence', q: 'Over time, using AI has made me...', left: 'More capable and independent on my own in research tasks', right: 'More reliant on AI for research tasks I used to do myself' },
+  { key: 'slider_origin', q: 'When I use AI for research work, it feels like it is...', left: 'Surfacing information that already exists', right: 'Creating something new or creative' },
+  { key: 'slider_personhood', q: 'AI feels to me like...', left: 'A neutral, impersonal instrument', right: 'Something with its own point of view' }
 ];
 
-const LANG_OPTIONS = ['English','Other'];
+const LANG_OPTIONS = ['English', 'Other'];
 
-const REVIEWED_OPTIONS = ['None','1–5','6–15','16–30','More than 30'];
+const REVIEWED_OPTIONS = ['None', '1–5', '6–15', '16–30', 'More than 30'];
 
 const COUNTRY_OPTIONS = [
-  'Afghanistan','Albania','Algeria','Andorra','Angola','Argentina','Armenia','Australia','Austria',
-  'Azerbaijan','Bahamas','Bahrain','Bangladesh','Barbados','Belarus','Belgium','Belize','Benin','Bhutan',
-  'Bolivia','Bosnia and Herzegovina','Botswana','Brazil','Brunei','Bulgaria','Burkina Faso','Burundi',
-  'Cambodia','Cameroon','Canada','Cape Verde','Central African Republic','Chad','Chile','China','Colombia',
-  'Comoros','Costa Rica','Croatia','Cuba','Cyprus','Czech Republic','Denmark','Djibouti','Dominican Republic',
-  'Ecuador','Egypt','El Salvador','Equatorial Guinea','Eritrea','Estonia','Eswatini','Ethiopia','Fiji',
-  'Finland','France','Gabon','Gambia','Georgia','Germany','Ghana','Greece','Grenada','Guatemala','Guinea',
-  'Guinea-Bissau','Guyana','Haiti','Honduras','Hungary','Iceland','India','Indonesia','Iran','Iraq','Ireland',
-  'Israel','Italy','Ivory Coast','Jamaica','Japan','Jordan','Kazakhstan','Kenya','Kiribati','Kosovo','Kuwait',
-  'Kyrgyzstan','Laos','Latvia','Lebanon','Lesotho','Liberia','Libya','Liechtenstein','Lithuania','Luxembourg',
-  'Madagascar','Malawi','Malaysia','Maldives','Mali','Malta','Marshall Islands','Mauritania','Mauritius',
-  'Mexico','Micronesia','Moldova','Monaco','Mongolia','Montenegro','Morocco','Mozambique','Myanmar','Namibia',
-  'Nauru','Nepal','Netherlands','New Zealand','Nicaragua','Niger','Nigeria','North Korea','North Macedonia',
-  'Norway','Oman','Pakistan','Palau','Palestine','Panama','Papua New Guinea','Paraguay','Peru','Philippines',
-  'Poland','Portugal','Qatar','Romania','Russia','Rwanda','Saint Kitts and Nevis','Saint Lucia',
-  'Saint Vincent and the Grenadines','Samoa','San Marino','Sao Tome and Principe','Saudi Arabia','Senegal',
-  'Serbia','Seychelles','Sierra Leone','Singapore','Slovakia','Slovenia','Solomon Islands','Somalia',
-  'South Africa','South Korea','South Sudan','Spain','Sri Lanka','Sudan','Suriname','Sweden','Switzerland',
-  'Syria','Taiwan','Tajikistan','Tanzania','Thailand','Timor-Leste','Togo','Tonga','Trinidad and Tobago',
-  'Tunisia','Turkey','Turkmenistan','Tuvalu','Uganda','Ukraine','United Arab Emirates','United Kingdom',
-  'United States','Uruguay','Uzbekistan','Vanuatu','Vatican City','Venezuela','Vietnam','Yemen','Zambia',
-  'Zimbabwe','Prefer not to say'
+  'United States', 'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Argentina', 'Armenia', 'Australia', 'Austria',
+  'Azerbaijan', 'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados', 'Belarus', 'Belgium', 'Belize', 'Benin', 'Bhutan',
+  'Bolivia', 'Bosnia and Herzegovina', 'Botswana', 'Brazil', 'Brunei', 'Bulgaria', 'Burkina Faso', 'Burundi',
+  'Cambodia', 'Cameroon', 'Canada', 'Cape Verde', 'Central African Republic', 'Chad', 'Chile', 'China', 'Colombia',
+  'Comoros', 'Costa Rica', 'Croatia', 'Cuba', 'Cyprus', 'Czech Republic', 'Denmark', 'Djibouti', 'Dominican Republic',
+  'Ecuador', 'Egypt', 'El Salvador', 'Equatorial Guinea', 'Eritrea', 'Estonia', 'Eswatini', 'Ethiopia', 'Fiji',
+  'Finland', 'France', 'Gabon', 'Gambia', 'Georgia', 'Germany', 'Ghana', 'Greece', 'Grenada', 'Guatemala', 'Guinea',
+  'Guinea-Bissau', 'Guyana', 'Haiti', 'Honduras', 'Hungary', 'Iceland', 'India', 'Indonesia', 'Iran', 'Iraq', 'Ireland',
+  'Israel', 'Italy', 'Ivory Coast', 'Jamaica', 'Japan', 'Jordan', 'Kazakhstan', 'Kenya', 'Kiribati', 'Kosovo', 'Kuwait',
+  'Kyrgyzstan', 'Laos', 'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya', 'Liechtenstein', 'Lithuania', 'Luxembourg',
+  'Madagascar', 'Malawi', 'Malaysia', 'Maldives', 'Mali', 'Malta', 'Marshall Islands', 'Mauritania', 'Mauritius',
+  'Mexico', 'Micronesia', 'Moldova', 'Monaco', 'Mongolia', 'Montenegro', 'Morocco', 'Mozambique', 'Myanmar', 'Namibia',
+  'Nauru', 'Nepal', 'Netherlands', 'New Zealand', 'Nicaragua', 'Niger', 'Nigeria', 'North Korea', 'North Macedonia',
+  'Norway', 'Oman', 'Pakistan', 'Palau', 'Palestine', 'Panama', 'Papua New Guinea', 'Paraguay', 'Peru', 'Philippines',
+  'Poland', 'Portugal', 'Qatar', 'Romania', 'Russia', 'Rwanda', 'Saint Kitts and Nevis', 'Saint Lucia',
+  'Saint Vincent and the Grenadines', 'Samoa', 'San Marino', 'Sao Tome and Principe', 'Saudi Arabia', 'Senegal',
+  'Serbia', 'Seychelles', 'Sierra Leone', 'Singapore', 'Slovakia', 'Slovenia', 'Solomon Islands', 'Somalia',
+  'South Africa', 'South Korea', 'South Sudan', 'Spain', 'Sri Lanka', 'Sudan', 'Suriname', 'Sweden', 'Switzerland',
+  'Syria', 'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Timor-Leste', 'Togo', 'Tonga', 'Trinidad and Tobago',
+  'Tunisia', 'Turkey', 'Turkmenistan', 'Tuvalu', 'Uganda', 'Ukraine', 'United Arab Emirates', 'United Kingdom', 
+  'Uruguay', 'Uzbekistan', 'Vanuatu', 'Vatican City', 'Venezuela', 'Vietnam', 'Yemen', 'Zambia',
+  'Zimbabwe', 'Prefer not to say'
 ];
 
 const UNDERSTANDING_OPTIONS = [
@@ -143,58 +143,58 @@ const UNDERSTANDING_OPTIONS = [
 ];
 
 const ENGAGEMENT_OPTIONS = [
-  {l:'I used it to clarify or check my understanding of the study.'},
-  {l:'I used it to summarize part or all of the study.'},
-  {l:'I used it to help develop, refine, or question my own ideas.'},
-  {l:'I used it to suggest possible interpretations, strengths, limitations, or future directions.'},
-  {l:'I used it to organize, phrase, or improve my written responses.'},
-  {l:'I read its responses but made little or no use of them in my answers.'},
-  {l:'I did not use the AI assistant for this study.', exclusive:true}
+  { l: 'I used it to clarify or check my understanding of the study.' },
+  { l: 'I used it to summarize part or all of the study.' },
+  { l: 'I used it to help develop, refine, or question my own ideas.' },
+  { l: 'I used it to suggest possible interpretations, strengths, limitations, or future directions.' },
+  { l: 'I used it to organize, phrase, or improve my written responses.' },
+  { l: 'I read its responses but made little or no use of them in my answers.' },
+  { l: 'I did not use the AI assistant for this study.', exclusive: true }
 ];
 
 // SRL — 21 items, 6 categories (verbatim from spec)
 const SRL_ITEMS = [
   // Goal Setting
-  ['srl_goal_standards','I set personal standards for the quality of my research work.','goal_setting'],
-  ['srl_goal_shortlong','I set short-term goals for what I want to accomplish in a specific research task, as well as longer-term goals for the overall project.','goal_setting'],
-  ['srl_goal_deadlines','I set realistic deadlines for completing research work.','goal_setting'],
+  ['srl_goal_standards', 'I set personal standards for the quality of my research work.', 'goal_setting'],
+  ['srl_goal_shortlong', 'I set short-term goals for what I want to accomplish in a specific research task, as well as longer-term goals for the overall project.', 'goal_setting'],
+  ['srl_goal_deadlines', 'I set realistic deadlines for completing research work.', 'goal_setting'],
   // Strategic Planning
-  ['srl_plan_questions','I ask myself questions about what I need to understand or evaluate before I begin.','strategic_planning'],
-  ['srl_plan_alternatives','I think of alternative ways to approach a research problem and choose the one that seems most useful.','strategic_planning'],
-  ['srl_plan_adapt','When planning my research work, I use and adapt strategies that have worked in the past.','strategic_planning'],
-  ['srl_plan_organize','I organize my time and resources to accomplish my research goals to the best of my ability.','strategic_planning'],
+  ['srl_plan_questions', 'I ask myself questions about what I need to understand or evaluate before I begin.', 'strategic_planning'],
+  ['srl_plan_alternatives', 'I think of alternative ways to approach a research problem and choose the one that seems most useful.', 'strategic_planning'],
+  ['srl_plan_adapt', 'When planning my research work, I use and adapt strategies that have worked in the past.', 'strategic_planning'],
+  ['srl_plan_organize', 'I organize my time and resources to accomplish my research goals to the best of my ability.', 'strategic_planning'],
   // Task Strategies
-  ['srl_task_ownwords','I try to translate new information into my own words.','task_strategies'],
-  ['srl_task_change','I change strategies when I do not make progress.','task_strategies'],
-  ['srl_task_notes','When working on research tasks, I make notes to help organize my thoughts.','task_strategies'],
-  ['srl_task_examples','I create my own examples or interpretations to make information more meaningful.','task_strategies'],
+  ['srl_task_ownwords', 'I try to translate new information into my own words.', 'task_strategies'],
+  ['srl_task_change', 'I change strategies when I do not make progress.', 'task_strategies'],
+  ['srl_task_notes', 'When working on research tasks, I make notes to help organize my thoughts.', 'task_strategies'],
+  ['srl_task_examples', 'I create my own examples or interpretations to make information more meaningful.', 'task_strategies'],
   // Elaboration
-  ['srl_elab_relate','When learning something new, I try to relate it to what I already know.','elaboration'],
-  ['srl_elab_combine','When learning something new, I combine different sources of information, such as papers, prior readings, AI tools, websites, or other materials.','elaboration'],
-  ['srl_elab_prior','I draw on my prior knowledge and research experience when interpreting new information.','elaboration'],
+  ['srl_elab_relate', 'When learning something new, I try to relate it to what I already know.', 'elaboration'],
+  ['srl_elab_combine', 'When learning something new, I combine different sources of information, such as papers, prior readings, AI tools, websites, or other materials.', 'elaboration'],
+  ['srl_elab_prior', 'I draw on my prior knowledge and research experience when interpreting new information.', 'elaboration'],
   // Self-Evaluation
-  ['srl_eval_know','I usually know how well I understand something once I have finished working on it.','self_evaluation'],
-  ['srl_eval_different','After finishing a research task, I consider whether the task could be approached differently.','self_evaluation'],
-  ['srl_eval_learned','I think about what I have learned after I finish a research task.','self_evaluation'],
+  ['srl_eval_know', 'I usually know how well I understand something once I have finished working on it.', 'self_evaluation'],
+  ['srl_eval_different', 'After finishing a research task, I consider whether the task could be approached differently.', 'self_evaluation'],
+  ['srl_eval_learned', 'I think about what I have learned after I finish a research task.', 'self_evaluation'],
   // Help Seeking
-  ['srl_help_identify','I try to identify specific questions I can ask when I need help.','help_seeking'],
-  ['srl_help_guidance','When I am unsure where to start, I seek guidance to help me decide how to approach the task.','help_seeking'],
-  ['srl_help_beforeown','I ask other people or AI what to think about a research task before I have formed my own view.','help_seeking'],
-  ['srl_help_own_r','Even when I am having trouble understanding something, I prefer to work through it on my own before asking for help. (Reverse-scored)','help_seeking']
+  ['srl_help_identify', 'I try to identify specific questions I can ask when I need help.', 'help_seeking'],
+  ['srl_help_guidance', 'When I am unsure where to start, I seek guidance to help me decide how to approach the task.', 'help_seeking'],
+  ['srl_help_beforeown', 'I ask other people or AI what to think about a research task before I have formed my own view.', 'help_seeking'],
+  ['srl_help_own_r', 'Even when I am having trouble understanding something, I prefer to work through it on my own before asking for help.', 'help_seeking']
 ];
 
 // Critical-Thinking scale — 6 items (verbatim), shared by pre/post placement
-const CT_ITEMS_LIST = (function(){
+const CT_ITEMS_LIST = (function () {
   const pairs = [
-    'ct_credibility','I critically evaluate the credibility of the sources of information I encounter.',
-    'ct_evidence','I consider whether the evidence presented supports the conclusion being made.',
-    'ct_alternatives','I consider alternative explanations before accepting a research claim.',
-    'ct_bias','I reflect on possible biases in my own thinking when making judgments.',
-    'ct_assumptions','I question the assumptions underlying information or suggestions provided by AI tools.',
-    'ct_compare','I compare AI-generated information or recommendations with other sources before relying on them.'
+    'ct_credibility', 'I critically evaluate the credibility of the sources of information I encounter.',
+    'ct_evidence', 'I consider whether the evidence presented supports the conclusion being made.',
+    'ct_alternatives', 'I consider alternative explanations before accepting a research claim.',
+    'ct_bias', 'I reflect on possible biases in my own thinking when making judgments.',
+    'ct_assumptions', 'I question the assumptions underlying information or suggestions provided by AI tools.',
+    'ct_compare', 'I compare AI-generated information or recommendations with other sources before relying on them.'
   ];
   const out = [];
-  for (let i=0;i<pairs.length;i+=2){ out.push({key:pairs[i], label:pairs[i+1]}); }
+  for (let i = 0; i < pairs.length; i += 2) { out.push({ key: pairs[i], label: pairs[i + 1] }); }
   return out;
 })();
 
@@ -211,126 +211,150 @@ const CT_SCALE_NOTE = '1 = Not at all true for me, 7 = Very true for me';
 // (no per-paper custom wording), so the label lives here rather than per
 // paper as in the previous version.
 const STANDARD_Q_DEFS = [
-  {suffix:'q1', type:'textarea', label:'What do you think are the main strengths of this study?'},
-  {suffix:'q2', type:'textarea', label:'What do you think are the main limitations of this study?'},
-  {suffix:'q3', type:'textarea', label:'How could the study be improved, or what should researchers investigate next?'},
-  {suffix:'q4', type:'textarea', label:'What broader implications might follow from these findings beyond those stated in the paper?'},
-  {suffix:'convincing', type:'scale7', label:'How convincing do you find this paper?'}
+  { suffix: 'q1', type: 'textarea', label: 'What do you think are the main strengths of this study?' },
+  { suffix: 'q2', type: 'textarea', label: 'What do you think are the main limitations of this study?' },
+  { suffix: 'q3', type: 'textarea', label: 'How could the study be improved, or what should researchers investigate next?' },
+  { suffix: 'q4', type: 'textarea', label: 'What broader implications might follow from these findings beyond those stated in the paper?' },
+  { suffix: 'convincing', type: 'scale7', label: 'How convincing do you find this paper?' }
 ];
 
 // ---------- Papers ----------
 const PAPERS = {
   font: {
-    id:'font',
-    title:'Generational Differences in Font-Based Credibility Judgments Across Everyday Contexts',
-    pdfFile:'papers/font.pdf',
-    quiz:[
-      { q:'Why did the researchers include three different serif/sans-serif font pairs?',
-        options:[
+    id: 'font',
+    title: 'Generational Differences in Font-Based Credibility Judgments Across Everyday Contexts',
+    pdfFile: 'papers/font.pdf',
+    quiz: [
+      {
+        q: 'Why did the researchers include three different serif/sans-serif font pairs?',
+        options: [
           'A. To compare whether some font pairs produced stronger credibility judgments because they were easier to read',
           'B. To determine whether the generational difference remained when the specific typefaces changed, rather than depending on one familiar font contrast',
           'C. To ensure that each communicative context was presented in a different serif/sans-serif pair',
           'D. To examine whether older and younger adults differed in their familiarity with the six individual typefaces'
-        ], correct:'B' },
-      { q:'What is the best description of how trustworthiness was measured in the study?',
-        options:[
+        ], correct: 'B'
+      },
+      {
+        q: 'What is the best description of how trustworthiness was measured in the study?',
+        options: [
           'A. Participants rated the trustworthiness of each font version separately, and the two ratings were compared',
           'B. Participants rated how well each typeface fit the context, which was used as an indirect measure of trust',
           'C. Participants selected the more trustworthy version and then ranked all three font pairs',
           'D. Participants chose which of two identically worded versions they found more trustworthy'
-        ], correct:'D' },
-      { q:'Which statement best describes the Generation × Scenario interaction?',
-        options:[
+        ], correct: 'D'
+      },
+      {
+        q: 'Which statement best describes the Generation × Scenario interaction?',
+        options: [
           'A. Older adults showed their strongest serif preference in print-legacy contexts, whereas younger adults showed their clearest sans-serif preference in digitally native contexts',
           'B. Older adults preferred serif typefaces more than younger adults across all four scenarios, and the size of this difference remained constant across contexts',
           'C. Younger adults\' confidence ratings varied more across scenarios than older adults\' ratings did',
           'D. The interaction was driven mainly by the bank security notice, which produced the largest generational difference'
-        ], correct:'A' },
-      { q:'What explanation do the authors propose for the study\'s results?',
-        options:[
+        ], correct: 'A'
+      },
+      {
+        q: 'What explanation do the authors propose for the study\'s results?',
+        options: [
           'A. Communication context determines which typeface category appears credible: serif fonts naturally fit formal contexts, whereas sans-serif fonts naturally fit digital contexts, regardless of the reader\'s background',
           'B. Age-related differences in visual processing make serif fonts easier for older adults to interpret and sans-serif fonts easier for younger adults to interpret',
           'C. Repeated exposure to a typeface category in particular communicative contexts builds familiarity with that pairing, so what feels credible depends on a person\'s exposure history',
           'D. Individual typefaces possess relatively stable credibility cues, but different scenarios change how strongly readers attend to those cues'
-        ], correct:'C' }
+        ], correct: 'C'
+      }
     ]
   },
   food: {
-    id:'food',
-    title:'Does Food Processing Change Blood Sugar and Insulin Responses to a Calorie-Matched Lunch?',
-    pdfFile:'papers/food.pdf',
-    quiz:[
-      { q:'Why did the researchers use a within-subjects crossover design, with each participant eating both lunches on separate days?',
-        options:[
+    id: 'food',
+    title: 'Does Food Processing Change Blood Sugar and Insulin Responses to a Calorie-Matched Lunch?',
+    pdfFile: 'papers/food.pdf',
+    quiz: [
+      {
+        q: 'Why did the researchers use a within-subjects crossover design, with each participant eating both lunches on separate days?',
+        options: [
           'A. To compare each participant\'s responses across lunches while reducing the influence of stable metabolic differences between individuals',
           'B. To isolate processing level by ensuring that the two lunches were identical in every respect except how they were prepared',
           'C. To test whether eating one lunch changed participants\' metabolic response to the lunch served at the later visit',
           'D. To increase the effective sample size by treating the two visits as independent observations from different participants'
-        ], correct:'A' },
-      { q:'Why did the researchers use two blood draws rather than repeated blood sampling across the entire visit?',
-        options:[
+        ], correct: 'A'
+      },
+      {
+        q: 'Why did the researchers use two blood draws rather than repeated blood sampling across the entire visit?',
+        options: [
           'A. Because the continuous glucose monitor captured the full metabolic response, making later insulin and triglyceride measurements unnecessary',
           'B. Because insulin and triglycerides were expected to remain relatively stable after the 60-minute measurement',
           'C. To ensure that collecting blood did not affect how much participants later ate from the snack tray',
           'D. To limit the burden of repeated blood draws while still measuring insulin and triglycerides at a time when post-meal responses typically peak'
-        ], correct:'D' },
-      { q:'What did the correlation between the post-lunch glucose dip and snack intake suggest?',
-        options:[
+        ], correct: 'D'
+      },
+      {
+        q: 'What did the correlation between the post-lunch glucose dip and snack intake suggest?',
+        options: [
           'A. Larger glucose drops were associated with greater snack intake, indicating that the glucose dip fully accounted for the lunch-condition difference in later eating',
           'B. Larger glucose drops were associated with greater snack intake only after the ultra-processed lunch, indicating that the relationship did not occur in the other condition',
           'C. Larger glucose drops were associated with greater snack intake, but the correlation alone could not establish that the glucose dip caused participants to eat more',
           'D. Larger glucose drops predicted greater snack intake even after differences in taste and texture were controlled statistically'
-        ], correct:'C' },
-      { q:'What mechanism do the authors propose linking food processing to the different metabolic responses?',
-        options:[
+        ], correct: 'C'
+      },
+      {
+        q: 'What mechanism do the authors propose linking food processing to the different metabolic responses?',
+        options: [
           'A. Greater processing makes food easier to break down and absorb, which may produce a sharper glucose rise, a larger insulin response, and a later decline',
           'B. Ultra-processed foods contain more metabolizable calories than their labels report, even when labeled calories and macronutrients are matched',
           'C. Additives in ultra-processed foods directly impair insulin signaling, causing glucose to remain elevated throughout the observation period',
           'D. Minimally processed foods require more chewing, and the slower eating rate accounts for the observed glucose and insulin differences'
-        ], correct:'A' }
+        ], correct: 'A'
+      }
     ]
   },
   listing: {
-    id:'listing',
-    title:'Do Online Product Listings Accurately Describe What Arrives in the Package?',
-    pdfFile:'papers/listing.pdf',
-    quiz:[
-      { q:'What did the researchers use as an external benchmark to assess whether audit-coded mismatch scores or star ratings reflected real-world listing problems?',
-        options:[
+    id: 'listing',
+    title: 'Do Online Product Listings Accurately Describe What Arrives in the Package?',
+    pdfFile: 'papers/listing.pdf',
+    quiz: [
+      {
+        q: 'What did the researchers use as an external benchmark to assess whether audit-coded mismatch scores or star ratings reflected real-world listing problems?',
+        options: [
           'A. Each listing\'s overall return rate, which combined returns due to inaccurate descriptions with returns for fit, preference, damage, and other reasons',
           'B. The proportion of written reviews that mentioned discrepancies between the listing and the delivered product',
           'C. Each listing\'s trailing 90-day item-not-as-described return rate, which recorded returns attributed specifically to the product not matching its listing',
           'D. The number of customer complaints or policy reports submitted against the seller during the preceding 90 days'
-        ], correct:'C' },
-      { q:'How did the researchers sample products across the three seller types within each product category?',
-        options:[
+        ], correct: 'C'
+      },
+      {
+        q: 'How did the researchers sample products across the three seller types within each product category?',
+        options: [
           'A. They sampled seller types in proportion to their share of listings on the marketplace',
           'B. They sampled the same number of products from each seller type within every category',
           'C. They sampled more seller-shipped third-party listings in categories expected to have higher mismatch rates',
           'D. They sampled products from only one seller type within each category'
-        ], correct:'B' },
-      { q:'Which conclusion is best supported by the category-specific mismatch results?',
-        options:[
+        ], correct: 'B'
+      },
+      {
+        q: 'Which conclusion is best supported by the category-specific mismatch results?',
+        options: [
           'A. Product categories differed mainly in how often mismatches occurred, while the types of claims that failed were broadly similar across categories',
           'B. Product categories differed both in their overall mismatch rates and in the kinds of listing claims that were most often inaccurate',
           'C. Differences between product categories were primarily caused by unequal representation of the three seller types',
           'D. Categories with more easily measurable physical features, such as dimensions or capacity, consistently showed the highest mismatch rates'
-        ], correct:'B' },
-      { q:'Why might star ratings fail to closely track objective listing accuracy, according to the authors?',
-        options:[
+        ], correct: 'B'
+      },
+      {
+        q: 'Why might star ratings fail to closely track objective listing accuracy, according to the authors?',
+        options: [
           'A. Star ratings are calculated across all products sold by the same seller, whereas mismatch scores were calculated for individual listings',
           'B. Star ratings are based primarily on whether a product was returned, whereas mismatch scores were based on direct inspection',
           'C. Star ratings place greater weight on recent reviews, whereas mismatch scores weighted every audited claim equally',
           'D. Star ratings combine listing accuracy with other aspects of the purchase, such as shipping, customer service, packaging, and price satisfaction'
-        ], correct:'D' }
+        ], correct: 'D'
+      }
     ]
   }
 };
 
 const PAGE_IDS = [];
-const PAPER_IDS = ['font','food','listing'];
+const PAPER_IDS = ['font', 'food', 'listing'];
 
-function getPlainStudyText(paperId){
+function getPlainStudyText(paperId) {
   return (window.PAPER_PLAIN_TEXT && window.PAPER_PLAIN_TEXT[paperId]) || '';
 }
 
@@ -339,25 +363,26 @@ let pageOrder = ['page-consent'];
 let currentIdx = 0;
 let QUIZ_PAGE_IDS = [];
 
-function buildPageOrder(){
-  const order = ['page-consent','page-about-you','page-srl'];
+function buildPageOrder() {
+  const order = ['page-consent', 'page-about-you', 'page-srl'];
   if (DATA.ct_scale_placement === 'pre') order.push('page-ct');
-  order.push('page-ai-experience','page-instructions','page-study-1','page-study-2','page-reflections');
+  order.push('page-ai-experience', 'page-instructions', 'page-study-1', 'page-study-2', 'page-reflections');
   if (DATA.ct_scale_placement === 'post') order.push('page-ct');
   order.push('page-quiz-intro');
   order.push(...QUIZ_PAGE_IDS);
   order.push('page-debrief');
+  order.push('page-debrief', 'page-submitted');
   pageOrder = order;
   applySectionNumbers();
 }
 
-function applySectionNumbers(){
+function applySectionNumbers() {
   const pre = DATA.ct_scale_placement === 'pre';
   const map = pre
-    ? {about_you:1, srl:2, ct:3, ai_experience:4, task:5, reflections:6, quiz:7, debrief:8}
-    : {about_you:1, srl:2, ai_experience:3, task:4, reflections:5, ct:6, quiz:7, debrief:8};
-  Object.keys(map).forEach(k=>{
-    const el = document.getElementById('secnum-' + k.replace(/_/g,'-'));
+    ? { about_you: 1, srl: 2, ct: 3, ai_experience: 4, task: 5, reflections: 6, quiz: 7, debrief: 8 }
+    : { about_you: 1, srl: 2, ai_experience: 3, task: 4, reflections: 5, ct: 6, quiz: 7, debrief: 8 };
+  Object.keys(map).forEach(k => {
+    const el = document.getElementById('secnum-' + k.replace(/_/g, '-'));
     if (el) el.textContent = map[k];
   });
 }
@@ -368,13 +393,13 @@ function applySectionNumbers(){
 // (which autosave() persists to localStorage every 10s and restoreAssignmentIfPresent()
 // can read back). This makes the assignment immune to refresh, resize,
 // tab-switch, or page navigation, since none of those re-run this function.
-function assignConditionAndOrder(){
+function assignConditionAndOrder() {
   const tier = DATA.expertise_tier;
   const counterKey = 'strat_counter_' + tier;
   let counter = 0;
-  try { counter = parseInt(localStorage.getItem(counterKey) || '0', 10); } catch(e){}
+  try { counter = parseInt(localStorage.getItem(counterKey) || '0', 10); } catch (e) { }
   const condition = (counter % 2 === 0) ? 'AI' : 'noAI';
-  try { localStorage.setItem(counterKey, String(counter + 1)); } catch(e){}
+  try { localStorage.setItem(counterKey, String(counter + 1)); } catch (e) { }
   DATA.condition = condition;
   DATA.ai_condition = condition;
   document.body.classList.add(condition === 'AI' ? 'condition-ai' : 'condition-noai');
@@ -383,10 +408,10 @@ function assignConditionAndOrder(){
   // cell (4 cells total: lower/higher x AI/noAI), alternating pre/post.
   const ctKey = 'strat_ct_counter_' + tier + '_' + condition;
   let ctCounter = 0;
-  try { ctCounter = parseInt(localStorage.getItem(ctKey) || '0', 10); } catch(e){}
+  try { ctCounter = parseInt(localStorage.getItem(ctKey) || '0', 10); } catch (e) { }
   DATA.ct_scale_placement = (ctCounter % 2 === 0) ? 'pre' : 'post';
   DATA.critical_thinking_placement = DATA.ct_scale_placement;
-  try { localStorage.setItem(ctKey, String(ctCounter + 1)); } catch(e){}
+  try { localStorage.setItem(ctKey, String(ctCounter + 1)); } catch (e) { }
 
   // Select 2 of the 3 pool papers without replacement, in randomized
   // presentation order; the third stays unassigned for this participant.
@@ -405,8 +430,8 @@ function assignConditionAndOrder(){
   DATA.unassigned_paper_id = unassigned;
 }
 
-function fisherYates(arr){
-  for (let i = arr.length - 1; i > 0; i--){
+function fisherYates(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
@@ -416,43 +441,43 @@ function fisherYates(arr){
 // ---------- Navigation ----------
 let quizTransitionTimer = null;
 
-function showPage(id){
+function showPage(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   const el = document.getElementById(id);
   if (el) el.classList.add('active');
-  window.scrollTo(0,0);
+  window.scrollTo(0, 0);
   document.getElementById('siteHeader').style.display = (id === 'page-consent') ? '' : 'none';
   updateNav();
   const m = /^page-study-(\d)$/.exec(id);
-  if (m){
-    const slotNum = parseInt(m[1],10);
+  if (m) {
+    const slotNum = parseInt(m[1], 10);
     const paperId = DATA['study_' + slotNum + '_id'];
-    if (paperId){
+    if (paperId) {
       markStudyStart(id);
       renderStudyPdfIfNeeded(paperId);
     }
   }
   // Quiz transition pages have no Continue button — clear any previous
   // pending timer (so re-showing a page never stacks two timers) and, if the
-  // page we just showed is a transition page, auto-advance after 5s.
+  // page we just showed is a transition page, auto-advance after 3s.
   clearTimeout(quizTransitionTimer);
-  if (/^page-quiz-transition-/.test(id)){
-    quizTransitionTimer = setTimeout(() => navigate(1), 5000);
+  if (/^page-quiz-transition-/.test(id)) {
+    quizTransitionTimer = setTimeout(() => navigate(1), 3000);
   }
 }
 
-const selfNavPages = ['page-consent', 'page-exit'];
+const selfNavPages = ['page-consent', 'page-exit', 'page-submitted'];
 
 // Quiz transition pages (one per assigned paper, see buildQuizPages()) have
 // dynamic ids ('page-quiz-transition-<paperId>') and, like selfNavPages,
-// have no manual Continue button — they auto-advance instead (the 5s timer
+// have no manual Continue button — they auto-advance instead (the 3s timer
 // in showPage()). Matched by pattern rather than added to the fixed
 // selfNavPages array since the ids depend on paper assignment.
-function isSelfNavPage(id){
+function isSelfNavPage(id) {
   return selfNavPages.includes(id) || /^page-quiz-transition-/.test(id);
 }
 
-function updateNav(){
+function updateNav() {
   const idx = pageOrder.indexOf(getCurrentPageId());
   const total = pageOrder.length;
   // Quiz transition pages are included in pageOrder (via QUIZ_PAGE_IDS), so
@@ -466,7 +491,7 @@ function updateNav(){
   if (stepLabel) stepLabel.textContent = '';
   const btnNext = document.getElementById('btnNext');
   const curId = getCurrentPageId();
-  if (isSelfNavPage(curId)){
+  if (isSelfNavPage(curId)) {
     if (btnNext) btnNext.style.display = 'none';
   } else {
     if (btnNext) btnNext.style.display = '';
@@ -476,43 +501,47 @@ function updateNav(){
   if (topMeta) topMeta.textContent = 'ID: ' + DATA.participant_id;
 }
 
-function getCurrentPageId(){
+function getCurrentPageId() {
   const active = document.querySelector('.page.active');
   return active ? active.id : pageOrder[0];
 }
 
 let currentStudyPaperId = null;
 
-function navigate(dir){
+function navigate(dir) {
   if (!validateCurrentPage()) return;
   const curId = getCurrentPageId();
   const idx = pageOrder.indexOf(curId);
+  if (curId === 'page-debrief' && dir > 0) {
+  finalizeSubmission();
+  return;
+}
 
   const studyMatch = /^page-study-(\d)$/.exec(curId);
-  if (studyMatch && dir > 0){
+  if (studyMatch && dir > 0) {
     const paperId = DATA['study_' + studyMatch[1] + '_id'];
     if (paperId) finalizeStudyTiming(paperId);
   }
 
   collectFieldsNow();
 
-  if (curId === 'page-about-you' && dir > 0){
+  if (curId === 'page-about-you' && dir > 0) {
     finalizeAboutYou();
   }
 
   let nextIdx = idx + dir;
   if (nextIdx < 0) nextIdx = 0;
-  if (nextIdx >= pageOrder.length){
+  if (nextIdx >= pageOrder.length) {
     finalizeSubmission();
     return;
   }
   currentIdx = nextIdx;
   const nextId = pageOrder[currentIdx];
 
-  if (curId === 'page-instructions' && dir > 0){
+  if (curId === 'page-instructions' && dir > 0) {
     enterFullscreenAndStart();
   }
-  if (curId === 'page-quiz-intro' && dir > 0 && QUIZ_PAGE_IDS.length === 0){
+  if (curId === 'page-quiz-intro' && dir > 0 && QUIZ_PAGE_IDS.length === 0) {
     buildQuizPages();
     buildPageOrder();
     currentIdx = pageOrder.indexOf('page-quiz-intro') + 1;
@@ -521,7 +550,7 @@ function navigate(dir){
   showPage(pageOrder[currentIdx]);
 }
 
-function finalizeAboutYou(){
+function finalizeAboutYou() {
   const roleVal = document.querySelector('input[name="ay_role"]:checked');
   const roleObj = roleVal ? ROLE_OPTIONS.find(o => o.l === roleVal.value) : null;
   DATA.expertise_tier = roleObj ? roleObj.tier : 'lower';
@@ -533,22 +562,22 @@ function finalizeAboutYou(){
   buildStudyPages();
 }
 
-function finalizeStudyTiming(paperId){
+function finalizeStudyTiming(paperId) {
   if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
   DATA.timing[paperId].study_end_ts = nowTs();
   DATA.timing[paperId].study_end_iso = nowIso();
-  if (DATA.timing[paperId].study_start_ts){
+  if (DATA.timing[paperId].study_start_ts) {
     DATA.timing[paperId].duration_ms = DATA.timing[paperId].study_end_ts - DATA.timing[paperId].study_start_ts;
   }
 }
 
-function markStudyStart(slotId){
+function markStudyStart(slotId) {
   const m = /^page-study-(\d)$/.exec(slotId);
   if (!m) return;
   const paperId = DATA['study_' + m[1] + '_id'];
   if (!paperId) return;
   if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
-  if (!DATA.timing[paperId].study_start_ts){
+  if (!DATA.timing[paperId].study_start_ts) {
     DATA.timing[paperId].study_start_ts = nowTs();
     DATA.timing[paperId].study_start_iso = nowIso();
   }
@@ -556,33 +585,33 @@ function markStudyStart(slotId){
 }
 
 // ---------- Validation (kept disabled per prior testing instruction) ----------
-function isFieldVisible(el){
+function isFieldVisible(el) {
   if (!el) return false;
   return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
 }
-function clearValidationErrors(pageEl){
+function clearValidationErrors(pageEl) {
   if (!pageEl) return;
   pageEl.querySelectorAll('.input-error').forEach(el => el.classList.remove('input-error'));
   pageEl.querySelectorAll('.group-error').forEach(el => el.classList.remove('group-error'));
 }
-function flagGroupError(container){
+function flagGroupError(container) {
   if (container) container.classList.add('group-error');
 }
-function validateCurrentPage(){
+function validateCurrentPage() {
   // TEMP: required-field enforcement disabled for fast click-through testing.
   // Re-enable by removing this early return once testing is done.
   return true;
 }
 
 // ---------- Consent page ----------
-function toggleConsent(inputId, visualId){
+function toggleConsent(inputId, visualId) {
   const input = document.getElementById(inputId);
   const visual = document.getElementById(visualId);
   input.checked = !input.checked;
   visual.classList.toggle('checked', input.checked);
 }
 
-function populateCountrySelect(){
+function populateCountrySelect() {
   const select = document.getElementById('ay_country');
   if (!select || select.dataset.populated) return; // never re-run, so an in-progress selection is never reset
   const options = COUNTRY_OPTIONS.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
@@ -590,11 +619,11 @@ function populateCountrySelect(){
   select.dataset.populated = 'true';
 }
 
-function renderRadioGroup(containerId, name, options, getLabel, type){
+function renderRadioGroup(containerId, name, options, getLabel, type) {
   const container = document.getElementById(containerId);
   if (!container) return;
   type = type || 'radio';
-  container.innerHTML = options.map((o,i) => {
+  container.innerHTML = options.map((o, i) => {
     const value = getLabel ? getLabel(o) : o;
     const sub = (typeof o === 'object' && o.sub) ? `<div class="q-sublabel" style="margin:4px 0 0;">${escapeHtml(o.sub)}</div>` : '';
     return `<label class="option-item" data-group="${name}">
@@ -605,7 +634,7 @@ function renderRadioGroup(containerId, name, options, getLabel, type){
   }).join('');
 }
 
-function initConsentPage(){
+function initConsentPage() {
   renderRadioGroup(
     'rg-familiar',
     'familiar',
@@ -627,8 +656,8 @@ function initConsentPage(){
   });
 }
 
-function showExitScreen(){
-  pageOrder = ['page-consent','page-exit'];
+function showExitScreen() {
+  pageOrder = ['page-consent', 'page-exit'];
   currentIdx = 1;
   document.getElementById('progressFill').style.width = '0%';
   document.getElementById('navStep').textContent = '';
@@ -637,7 +666,7 @@ function showExitScreen(){
   showPage('page-exit');
 }
 
-function declineConsent(){
+function declineConsent() {
   DATA.consent_status = 'declined';
   DATA.screening_exit_reason = 'declined_consent';
   DATA.completion_status = 'exited_early';
@@ -645,7 +674,7 @@ function declineConsent(){
   showExitScreen();
 }
 
-function submitConsentPage(){
+function submitConsentPage() {
   const prolific = document.getElementById('prolific_id').value.trim();
   const prolificHint = document.getElementById('prolificErrorHint');
   const familiar = document.querySelector('input[name="familiar"]:checked');
@@ -654,7 +683,7 @@ function submitConsentPage(){
   const errEl = document.getElementById('consent-error');
 
   let ok = true;
-  if (!prolific){
+  if (!prolific) {
     document.getElementById('prolific_id').classList.add('input-error');
     if (prolificHint) prolificHint.style.display = 'block';
     ok = false;
@@ -662,20 +691,20 @@ function submitConsentPage(){
     document.getElementById('prolific_id').classList.remove('input-error');
     if (prolificHint) prolificHint.style.display = 'none';
   }
-  if (!familiar){
+  if (!familiar) {
     flagGroupError(document.getElementById('rg-familiar'));
     ok = false;
   }
-  if (!consentCb.checked || !mediaCb.checked){
+  if (!consentCb.checked || !mediaCb.checked) {
     ok = false;
   }
-  if (!ok){
+  if (!ok) {
     if (errEl) errEl.style.display = 'block';
     return;
   }
   if (errEl) errEl.style.display = 'none';
 
-  if (familiar.value.startsWith('No')){
+  if (familiar.value.startsWith('No')) {
     DATA.screening_exit_reason = 'not_familiar_with_ai';
     DATA.completion_status = 'exited_early';
     DATA.session_end_iso = nowIso();
@@ -693,45 +722,49 @@ function submitConsentPage(){
   showPage('page-about-you');
 }
 
-function escapeHtml(s){
+function escapeHtml(s) {
   return String(s == null ? '' : s)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ---------- Generic rendering helpers ----------
-function updateSliderFill(el){
+function updateSliderFill(el) {
   const min = parseFloat(el.min) || 0, max = parseFloat(el.max) || 100;
   const pct = ((parseFloat(el.value) - min) / (max - min)) * 100;
   el.style.background = `linear-gradient(to right, var(--terra) ${pct}%, var(--border) ${pct}%)`;
 }
 
-function likertItemHtml(name, label, leftLab, rightLab){
+function likertItemHtml(name, label, leftLab, rightLab) {
   let btns = '';
-  for (let i=1;i<=7;i++){
+  for (let i = 1; i <= 7; i++) {
     btns += `<button type="button" class="likert-btn" data-name="${name}" data-val="${i}" onclick="selectLikert(this)">${i}</button>`;
   }
   return `<div class="likert-item" data-name="${name}">
     <div class="likert-statement">${escapeHtml(label)}</div>
     <div class="likert-scale">${btns}</div>
+    <div class="scale-ends">
+      <div class="scale-end">${escapeHtml(leftLab || '')}</div>
+      <div class="scale-end right">${escapeHtml(rightLab || '')}</div>
+    </div>
   </div>`;
 }
 
-function selectLikert(btn){
+function selectLikert(btn) {
   const name = btn.getAttribute('data-name');
   document.querySelectorAll(`.likert-btn[data-name="${name}"]`).forEach(b => b.classList.remove('selected'));
   btn.classList.add('selected');
-  DATA.responses[name] = parseInt(btn.getAttribute('data-val'),10);
+  DATA.responses[name] = parseInt(btn.getAttribute('data-val'), 10);
 }
 
-function renderScale7Block(containerId, items, leftLab, rightLab, append){
+function renderScale7Block(containerId, items, leftLab, rightLab, append) {
   const container = document.getElementById(containerId);
   if (!container) return;
-  const html = items.map(([key,label]) => likertItemHtml(key, label, leftLab, rightLab)).join('');
+  const html = items.map(([key, label]) => likertItemHtml(key, label, leftLab, rightLab)).join('');
   if (append) container.innerHTML += html; else container.innerHTML = html;
 }
 
 // ---------- About You / SRL / CT / AI Experience rendering ----------
-function renderAllSections(){
+function renderAllSections() {
   // About You
   renderRadioGroup('rg-ay-lang', 'lang', LANG_OPTIONS);
   setupSpecifyField('rg-ay-lang', 'lang', 'Other');
@@ -739,15 +772,26 @@ function renderAllSections(){
   renderRadioGroup('rg-ay-reviewed', 'reviewed', REVIEWED_OPTIONS);
 
   // SRL
-  renderScale7Block('srlWrap', SRL_ITEMS.map(([k,l]) => [k,l]));
+  renderScale7Block(
+    'srlWrap',
+    SRL_ITEMS.map(([k, l]) => [k, l]),
+    'Not at all true for me',
+    'Very true for me'
+  );
 
   // Critical-Thinking shared template
   const ctIntroEl = document.getElementById('ctIntroText');
-  if (ctIntroEl){
+  if (ctIntroEl) {
     const introText = (DATA.ct_scale_placement === 'pre') ? CT_INTRO_PRE : CT_INTRO_POST;
-    ctIntroEl.innerHTML = `<p class="muted" style="margin-bottom:16px;">${escapeHtml(introText)}</p><p class="q-sublabel" style="margin-top:0;">${escapeHtml(CT_SCALE_NOTE)}</p>`;
+    ctIntroEl.innerHTML = `<p class="muted" style="margin-bottom:16px;">${escapeHtml(introText)}</p>`;
   }
-  renderScale7Block('ctWrap', CT_ITEMS_LIST.map(o => [o.key, o.label]));
+  renderScale7Block(
+    'ctWrap',
+    CT_ITEMS_LIST.map(o => [o.key, o.label]),
+    'Not at all true for me',
+    'Very true for me'
+  );
+
 
   // AI Experience
   renderRadioGroup('rg-ai-purpose', 'ai_purpose', AI_PURPOSE_OPTIONS, o => o.l, 'checkbox');
@@ -756,7 +800,7 @@ function renderAllSections(){
   renderRadioGroup('rg-ai-understanding', 'ai_understanding', UNDERSTANDING_OPTIONS);
 
   const slidersWrap = document.getElementById('slidersWrap');
-  if (slidersWrap){
+  if (slidersWrap) {
     slidersWrap.innerHTML = SLIDERS.map(s => `
       <div class="slider-block">
         <div class="slider-q">${escapeHtml(s.q)}</div>
@@ -774,11 +818,11 @@ function renderAllSections(){
 // whenever the option literally labeled `triggerLabel` (e.g. "Other") is
 // checked — used for the spec's "Other [specify]" options. Stores the typed
 // text in DATA.responses[fieldName + '_specify'].
-function setupSpecifyField(containerId, fieldName, triggerLabel){
+function setupSpecifyField(containerId, fieldName, triggerLabel) {
   const container = document.getElementById(containerId);
   if (!container) return;
   let specifyEl = document.getElementById(containerId + '-specify');
-  if (!specifyEl){
+  if (!specifyEl) {
     specifyEl = document.createElement('input');
     specifyEl.type = 'text';
     specifyEl.id = containerId + '-specify';
@@ -801,7 +845,7 @@ const INSTRUCTIONS_TITLE = 'Paper Evaluation Task';
 
 const INSTRUCTIONS_COMMON = [
   'You will read and evaluate two short research studies, presented one at a time. For each study, the paper will appear on the left and the response questions on the right.',
-  'The studies were artificially constructed for this research and are not real published papers. Please evaluate each one as you would a submitted research paper, using the information provided and your own scientific judgment. There are no single correct answers to the open-ended questions.',
+  'The studies were artificially constructed for this research and are not real published papers. Please evaluate each study as you would evaluate a submitted research paper, using the information provided and your own scientific judgment. There are no single correct answers to the open-ended questions.',
   'Please remain on the task page, which will be displayed in fullscreen mode. Do not open other tabs or applications or use outside tools, websites, search engines, or notes.'
 ];
 
@@ -876,11 +920,11 @@ const INSTRUCTIONS_MOCKUP_SVG_NOAI = `<svg viewBox="0 0 560 280" xmlns="http://w
   <rect x="280" y="188" width="252" height="52" rx="6" fill="#f3f5f8" stroke="#d9e2ec"/>
 </svg>`;
 
-function buildInstructionsText(){
+function buildInstructionsText() {
   const isAI = DATA.condition === 'AI';
   let html = `<p class="instructions-title">${escapeHtml(INSTRUCTIONS_TITLE)}</p>`;
   html += INSTRUCTIONS_COMMON.map(t => `<p style="margin-bottom:14px;">${escapeHtml(t)}</p>`).join('');
-  if (isAI){
+  if (isAI) {
     html += `<p style="margin-bottom:14px;">${escapeHtml(INSTRUCTIONS_AI_ONLY.intro)}</p>`;
     html += `<ul class="instructions-bullets">${INSTRUCTIONS_AI_ONLY.bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('')}</ul>`;
   } else {
@@ -889,7 +933,7 @@ function buildInstructionsText(){
   const textEl = document.getElementById('instructionsText');
   if (textEl) textEl.innerHTML = html;
   const mockupEl = document.getElementById('instructionsMockup');
-  if (mockupEl){
+  if (mockupEl) {
     mockupEl.innerHTML = isAI ? `
       <div class="mockup-block">${INSTRUCTIONS_MOCKUP_SVG_QUESTIONS}</div>
       <p class="mockup-note">${escapeHtml(INSTRUCTIONS_MOCKUP_NOTE)}</p>
@@ -903,9 +947,9 @@ function buildInstructionsText(){
 // ---------- Study pages ----------
 const STUDY_PDF_QUEUE = {};
 
-function buildStudyPages(){
+function buildStudyPages() {
   DATA.study_order.forEach((paperId, i) => {
-    const slotId = 'page-study-' + (i+1);
+    const slotId = 'page-study-' + (i + 1);
     const slotEl = document.getElementById(slotId);
     if (!slotEl) return;
     const paper = PAPERS[paperId];
@@ -914,15 +958,18 @@ function buildStudyPages(){
     const questionsHtml = STANDARD_Q_DEFS.map(def => {
       const label = def.label;
       const fieldId = paperId + '_' + def.suffix;
-      if (def.type === 'scale7'){
+      if (def.type === 'scale7') {
         let btns = '';
-        for (let v=1;v<=7;v++){
+        for (let v = 1; v <= 7; v++) {
           btns += `<button type="button" class="conf-btn" data-name="${fieldId}" data-val="${v}" onclick="selectConvincing(this)">${v}</button>`;
         }
         return `<div class="q-card">
           <div class="q-label">${escapeHtml(label)}</div>
-          <div class="q-sublabel">1 = Not at all convincing, 7 = Completely convincing</div>
           <div class="conf-scale" data-name="${fieldId}">${btns}</div>
+          <div class="scale-ends">
+            <div class="scale-end">Not at all convincing</div>
+            <div class="scale-end right">Completely convincing</div>
+          </div>
         </div>`;
       }
       return `<div class="q-card">
@@ -932,7 +979,7 @@ function buildStudyPages(){
     }).join('');
 
     slotEl.innerHTML = `
-      <div class="section-label"><div class="section-title">Study ${i+1} of 2</div></div>
+      <div class="section-label"><div class="section-title">Study ${i + 1} of 2</div></div>
       <div class="study-grid">
         <div class="paper-pane" id="paperPane-${paperId}">
           <div class="pdf-render-wrap" id="pdfWrap-${paperId}"><p class="pdf-status-msg">Loading paper…</p></div>
@@ -961,20 +1008,20 @@ function buildStudyPages(){
         </div>
       </div>`;
 
-    STUDY_PDF_QUEUE[paperId] = { url: paper.pdfFile, containerId: 'pdfWrap-' + paperId, rendered:false };
+    STUDY_PDF_QUEUE[paperId] = { url: paper.pdfFile, containerId: 'pdfWrap-' + paperId, rendered: false };
     if (isAI) updateAiRemainingUI(paperId);
   });
   attachLoggingListeners();
 }
 
-function selectConvincing(btn){
+function selectConvincing(btn) {
   const name = btn.getAttribute('data-name');
   document.querySelectorAll(`.conf-btn[data-name="${name}"]`).forEach(b => b.classList.remove('selected'));
   btn.classList.add('selected');
-  DATA.responses[name] = parseInt(btn.getAttribute('data-val'),10);
+  DATA.responses[name] = parseInt(btn.getAttribute('data-val'), 10);
 }
 
-function renderStudyPdfIfNeeded(paperId){
+function renderStudyPdfIfNeeded(paperId) {
   const entry = STUDY_PDF_QUEUE[paperId];
   if (!entry || entry.rendered) return;
   entry.rendered = true;
@@ -991,7 +1038,7 @@ let STUDY_PDF_IMAGES = {};
 const MAX_AI_VISION_PAGES = 8;
 const AI_VISION_MAX_DIMENSION = 1100; // px, longest side, before JPEG re-encode
 
-async function renderPDF(url, containerId, paperId){
+async function renderPDF(url, containerId, paperId) {
   const container = document.getElementById(containerId);
   if (!container) return;
   try {
@@ -999,7 +1046,7 @@ async function renderPDF(url, containerId, paperId){
     container.innerHTML = '';
     const dpr = window.devicePixelRatio || 1;
     const capturedImages = [];
-    for (let pageNum=1; pageNum<=pdf.numPages; pageNum++){
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
       const viewport = page.getViewport({ scale: 1 });
       const targetWidth = container.clientWidth || 760;
@@ -1013,16 +1060,16 @@ async function renderPDF(url, containerId, paperId){
       await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
       container.appendChild(canvas);
 
-      if (paperId && capturedImages.length < MAX_AI_VISION_PAGES){
+      if (paperId && capturedImages.length < MAX_AI_VISION_PAGES) {
         try {
           capturedImages.push(downscaleCanvasToJpeg(canvas, AI_VISION_MAX_DIMENSION));
-        } catch (captureErr){
+        } catch (captureErr) {
           console.error('Could not capture page image for AI vision', paperId, pageNum, captureErr);
         }
       }
     }
     if (paperId) STUDY_PDF_IMAGES[paperId] = capturedImages;
-  } catch (err){
+  } catch (err) {
     console.error('PDF render failed for', url, err);
     container.innerHTML = '<p class="pdf-status-msg">Could not load the paper. Please contact the study team.</p>';
   }
@@ -1032,7 +1079,7 @@ async function renderPDF(url, containerId, paperId){
 // returns a JPEG data URL. Keeps the on-screen canvas at full
 // (device-pixel-ratio-scaled) resolution for readability while sending the
 // AI assistant a much lighter copy.
-function downscaleCanvasToJpeg(sourceCanvas, maxDimension){
+function downscaleCanvasToJpeg(sourceCanvas, maxDimension) {
   const longestSide = Math.max(sourceCanvas.width, sourceCanvas.height);
   const ratio = longestSide > maxDimension ? (maxDimension / longestSide) : 1;
   const outW = Math.max(1, Math.round(sourceCanvas.width * ratio));
@@ -1044,16 +1091,16 @@ function downscaleCanvasToJpeg(sourceCanvas, maxDimension){
   return outCanvas.toDataURL('image/jpeg', 0.72);
 }
 
-function getStudyPdfImages(paperId){
+function getStudyPdfImages(paperId) {
   return STUDY_PDF_IMAGES[paperId] || [];
 }
 
 // ---------- AI chat panel ----------
-function switchWorkspaceTab(paperId, tab){
+function switchWorkspaceTab(paperId, tab) {
   const scope = document.getElementById('paperPane-' + paperId)?.closest('.study-page') || document;
   scope.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === tab));
   scope.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.getAttribute('data-tab') === tab));
-  if (tab === 'ai'){
+  if (tab === 'ai') {
     renderAIMessages(paperId);
     document.querySelectorAll('.ai-tab-btn').forEach(b => { b.classList.remove('attention'); b.querySelector('.tab-badge')?.remove(); });
     recordAiTabOpened(paperId);
@@ -1063,7 +1110,7 @@ function switchWorkspaceTab(paperId, tab){
 
 const MAX_AI_MESSAGES_PER_PAPER = 5;
 
-function getAiAggregate(paperId){
+function getAiAggregate(paperId) {
   // DATA.ai_paper_aggregates pre-populates each pool paper as an empty {}
   // object (see the DATA literal above), which is truthy — so a plain
   // "if (!DATA.ai_paper_aggregates[paperId])" guard never actually fills in
@@ -1072,7 +1119,7 @@ function getAiAggregate(paperId){
   // UI report the 5-message limit as already reached on first load. Always
   // merge in any missing default fields instead of only checking truthiness.
   const existing = DATA.ai_paper_aggregates[paperId];
-  if (!existing || typeof existing.successful_messages !== 'number'){
+  if (!existing || typeof existing.successful_messages !== 'number') {
     DATA.ai_paper_aggregates[paperId] = Object.assign({
       tab_opened: false, first_open_ts: null, time_to_first_open_ms: null,
       time_to_first_message_ms: null, total_messages: 0, successful_messages: 0,
@@ -1082,7 +1129,7 @@ function getAiAggregate(paperId){
   return DATA.ai_paper_aggregates[paperId];
 }
 
-function recordAiTabOpened(paperId){
+function recordAiTabOpened(paperId) {
   const agg = getAiAggregate(paperId);
   if (agg.tab_opened) return; // only the first open counts
   agg.tab_opened = true;
@@ -1091,7 +1138,7 @@ function recordAiTabOpened(paperId){
   if (startTs) agg.time_to_first_open_ms = agg.first_open_ts - startTs;
 }
 
-function updateAiRemainingUI(paperId){
+function updateAiRemainingUI(paperId) {
   const agg = getAiAggregate(paperId);
   const remaining = Math.max(0, MAX_AI_MESSAGES_PER_PAPER - agg.successful_messages);
   const note = document.getElementById('aiRemaining-' + paperId);
@@ -1106,7 +1153,7 @@ function updateAiRemainingUI(paperId){
   if (sendBtn) sendBtn.disabled = limitReached;
 }
 
-function renderAIMessages(paperId){
+function renderAIMessages(paperId) {
   const wrap = document.getElementById('aiMessages-' + paperId);
   if (!wrap) return;
   // Rebuilt purely from DATA.ai_chats — the thinking indicator is transient
@@ -1139,7 +1186,7 @@ function renderAIMessages(paperId){
 // remove the exact node we created for this study's request.
 let aiThinkingEls = {};
 
-function createThinkingMessage(paperId, messagesContainer){
+function createThinkingMessage(paperId, messagesContainer) {
   // Guard against a duplicate indicator for the same paper (e.g. a stray
   // double-invocation); reuse the existing element instead of stacking a new one.
   if (aiThinkingEls[paperId]) return aiThinkingEls[paperId];
@@ -1157,13 +1204,13 @@ function createThinkingMessage(paperId, messagesContainer){
   return thinkingEl;
 }
 
-function removeThinkingMessage(paperId){
+function removeThinkingMessage(paperId) {
   const el = aiThinkingEls[paperId];
   if (el && el.isConnected) el.remove();
   delete aiThinkingEls[paperId];
 }
 
-async function callBackendChat(paperId, userMessage){
+async function callBackendChat(paperId, userMessage) {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1178,7 +1225,7 @@ async function callBackendChat(paperId, userMessage){
       conversation_history: DATA.ai_chats[paperId]
     })
   });
-  if (!response.ok){
+  if (!response.ok) {
     throw new Error('Backend chat request failed with status ' + response.status);
   }
   const data = await response.json();
@@ -1187,7 +1234,7 @@ async function callBackendChat(paperId, userMessage){
 
 let aiSendInFlight = {};
 
-function handleAIInputKeydown(e, paperId){
+function handleAIInputKeydown(e, paperId) {
   if (e.key !== 'Enter') return;
   if (e.shiftKey) return; // allow newline
   if (e.isComposing || e.keyCode === 229) return; // IME composition in progress
@@ -1195,7 +1242,7 @@ function handleAIInputKeydown(e, paperId){
   sendAIMessage(paperId);
 }
 
-async function sendAIMessage(paperId){
+async function sendAIMessage(paperId) {
   if (aiSendInFlight[paperId]) return; // prevent duplicate requests (Send click or repeated Enter)
   const agg = getAiAggregate(paperId);
   if (agg.successful_messages >= MAX_AI_MESSAGES_PER_PAPER) return; // 5-message cap reached; input should already be disabled
@@ -1206,14 +1253,14 @@ async function sendAIMessage(paperId){
   if (!text) return; // ignore empty / whitespace-only submissions
 
   aiSendInFlight[paperId] = true;
-  if (sendBtn){ sendBtn.disabled = true; sendBtn.textContent = 'Thinking…'; }
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Thinking…'; }
   if (input) input.disabled = true;
 
   const sendStartTs = nowTs();
   agg.total_messages++;
-  DATA.ai_chats[paperId].push({ role:'user', content:text, ts: nowIso() });
+  DATA.ai_chats[paperId].push({ role: 'user', content: text, ts: nowIso() });
   if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
-  if (!DATA.timing[paperId].first_ai_message_ts){
+  if (!DATA.timing[paperId].first_ai_message_ts) {
     DATA.timing[paperId].first_ai_message_ts = nowTs();
     DATA.timing[paperId].first_ai_message_iso = nowIso();
     const startTs = DATA.timing[paperId].study_start_ts;
@@ -1233,14 +1280,14 @@ async function sendAIMessage(paperId){
     reply = await callBackendChat(paperId, text);
     // Remove the temporary indicator BEFORE the real reply is stored/rendered.
     removeThinkingMessage(paperId);
-    DATA.ai_chats[paperId].push({ role:'assistant', content: reply, ts: nowIso() });
+    DATA.ai_chats[paperId].push({ role: 'assistant', content: reply, ts: nowIso() });
     success = true;
-  } catch (err){
+  } catch (err) {
     console.error('AI chat error for', paperId, err); // detailed error stays in the console only
     errorType = (err && err.message) || 'unknown_error';
     removeThinkingMessage(paperId);
     reply = 'The assistant could not respond right now. Please try again.';
-    DATA.ai_chats[paperId].push({ role:'assistant', content: reply, ts: nowIso() });
+    DATA.ai_chats[paperId].push({ role: 'assistant', content: reply, ts: nowIso() });
   } finally {
     const sendEndTs = nowTs();
     // Only successful submissions count against the 5-message cap, per spec.
@@ -1278,7 +1325,7 @@ async function sendAIMessage(paperId){
 // ---------- Anti-cheat / fullscreen monitoring ----------
 let inTaskPhase = false;
 
-function showWarnBanner(msg){
+function showWarnBanner(msg) {
   const banner = document.getElementById('warnBanner');
   if (!banner) return;
   banner.textContent = msg;
@@ -1287,7 +1334,7 @@ function showWarnBanner(msg){
   showWarnBanner._t = setTimeout(() => { banner.style.display = 'none'; }, 4000);
 }
 
-function violationMessage(type){
+function violationMessage(type) {
   const map = {
     visibility: 'Please stay on this tab while completing the task.',
     blur: 'Please keep this window focused while completing the task.',
@@ -1298,7 +1345,7 @@ function violationMessage(type){
   return map[type] || 'Please follow the task instructions.';
 }
 
-function logViolation(type){
+function logViolation(type) {
   DATA.violations.push({ type, ts: nowIso(), paper_id: currentStudyPaperId });
   logBehavioralEvent(type);
   showWarnBanner(violationMessage(type));
@@ -1309,7 +1356,7 @@ function logViolation(type){
 // (which only records the negative/warning-worthy events) so both the
 // existing violations-based logic and the new spec's broader behavioral
 // event log have what they each expect.
-function logBehavioralEvent(type){
+function logBehavioralEvent(type) {
   DATA.behavioral_events.push({ participant_id: DATA.participant_id, paper_id: currentStudyPaperId, type, ts: nowIso() });
 }
 
@@ -1325,8 +1372,8 @@ window.addEventListener('focus', () => {
   if (inTaskPhase) logBehavioralEvent('focus');
 });
 document.addEventListener('fullscreenchange', () => {
-  if (inTaskPhase){
-    if (!document.fullscreenElement){
+  if (inTaskPhase) {
+    if (!document.fullscreenElement) {
       logViolation('fullscreen_exit');
       showFullscreenRequiredOverlay();
     } else {
@@ -1336,27 +1383,27 @@ document.addEventListener('fullscreenchange', () => {
   }
 });
 document.addEventListener('contextmenu', (e) => {
-  if (inTaskPhase){ e.preventDefault(); logViolation('contextmenu'); }
+  if (inTaskPhase) { e.preventDefault(); logViolation('contextmenu'); }
 });
 document.addEventListener('keydown', (e) => {
   if (!inTaskPhase) return;
   const isDevtools = e.key === 'F12' ||
-    ((e.ctrlKey || e.metaKey) && e.shiftKey && ['I','J','C'].includes(e.key)) ||
+    ((e.ctrlKey || e.metaKey) && e.shiftKey && ['I', 'J', 'C'].includes(e.key)) ||
     ((e.metaKey) && e.altKey && e.key === 'I');
-  if (isDevtools){ e.preventDefault(); logViolation('devtools_shortcut'); }
+  if (isDevtools) { e.preventDefault(); logViolation('devtools_shortcut'); }
 });
 
-function showFullscreenRequiredOverlay(){
+function showFullscreenRequiredOverlay() {
   document.getElementById('fsRequiredOverlay')?.classList.add('open');
 }
-function hideFullscreenRequiredOverlay(){
+function hideFullscreenRequiredOverlay() {
   document.getElementById('fsRequiredOverlay')?.classList.remove('open');
 }
 
-function enterFullscreenAndStart(){
+function enterFullscreenAndStart() {
   const el = document.documentElement;
   const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
-  if (req){
+  if (req) {
     req.call(el).then(() => {
       DATA.fullscreen_used = true;
       inTaskPhase = true;
@@ -1379,34 +1426,34 @@ function enterFullscreenAndStart(){
 const SUBSTANTIAL_REVISION_MIN_CHARS = 20;
 const SUBSTANTIAL_REVISION_PAUSE_MS = 2000;
 
-function diffCounts(oldVal, newVal){
+function diffCounts(oldVal, newVal) {
   let prefix = 0;
   const maxPrefix = Math.min(oldVal.length, newVal.length);
   while (prefix < maxPrefix && oldVal[prefix] === newVal[prefix]) prefix++;
   let oldEnd = oldVal.length, newEnd = newVal.length;
-  while (oldEnd > prefix && newEnd > prefix && oldVal[oldEnd-1] === newVal[newEnd-1]){ oldEnd--; newEnd--; }
+  while (oldEnd > prefix && newEnd > prefix && oldVal[oldEnd - 1] === newVal[newEnd - 1]) { oldEnd--; newEnd--; }
   const charsDeleted = Math.max(0, oldEnd - prefix);
   const charsInserted = Math.max(0, newEnd - prefix);
   return { charsDeleted, charsInserted };
 }
 
-function fieldIdToPaperId(fieldId){
+function fieldIdToPaperId(fieldId) {
   const match = PAPER_IDS.find(pid => fieldId === pid || fieldId.startsWith(pid + '_'));
   return match || null;
 }
 
-function attachLoggingListeners(){
+function attachLoggingListeners() {
   document.querySelectorAll('textarea[data-logfield]').forEach(ta => {
     const id = ta.getAttribute('data-logfield');
     if (ta._loggingAttached) return;
     ta._loggingAttached = true;
-    if (!DATA.logs[id]) DATA.logs[id] = { keystrokes:0, pastes:0, drafts:[] };
+    if (!DATA.logs[id]) DATA.logs[id] = { keystrokes: 0, pastes: 0, drafts: [] };
     ta._revisionSnapshot = ta.value || '';
     ta.addEventListener('keydown', () => { DATA.logs[id].keystrokes++; });
     ta.addEventListener('paste', (e) => {
       DATA.logs[id].pastes++;
       const pasted = (e.clipboardData || window.clipboardData).getData('text');
-      DATA.paste_events.push({ field:id, ts: nowIso(), length: pasted.length });
+      DATA.paste_events.push({ field: id, ts: nowIso(), length: pasted.length });
     });
     ta.addEventListener('input', () => {
       clearTimeout(ta._revisionTimer);
@@ -1414,7 +1461,7 @@ function attachLoggingListeners(){
         const before = ta._revisionSnapshot;
         const after = ta.value || '';
         const { charsDeleted, charsInserted } = diffCounts(before, after);
-        if (charsDeleted >= SUBSTANTIAL_REVISION_MIN_CHARS){
+        if (charsDeleted >= SUBSTANTIAL_REVISION_MIN_CHARS) {
           DATA.revision_log.push({
             participant_id: DATA.participant_id,
             paper_id: fieldIdToPaperId(id),
@@ -1436,27 +1483,43 @@ function attachLoggingListeners(){
 }
 
 // ---------- Reflections page ----------
-function buildPaperScaleRows(containerId, fieldPrefix){
+function buildPaperScaleRows(containerId, fieldPrefix) {
   const container = document.getElementById(containerId);
   if (!container) return;
+
+  let leftLabel = '';
+  let rightLabel = '';
+
+  if (fieldPrefix === 'confidence') {
+    leftLabel = 'Not at all confident';
+    rightLabel = 'Completely confident';
+  } else if (fieldPrefix === 'understood') {
+    leftLabel = 'Not at all well';
+    rightLabel = 'Very well';
+  }
+
   container.innerHTML = DATA.study_order.map((paperId, i) => {
     const name = fieldPrefix + '_' + paperId;
     let btns = '';
-    for (let v=1; v<=7; v++){
+    for (let v = 1; v <= 7; v++) {
       btns += `<button type="button" class="conf-btn" data-name="${name}" data-val="${v}" onclick="selectConvincing(this)">${v}</button>`;
     }
-    return `<div class="conf-row">
-      <div class="conf-label">Paper ${i+1}: ${escapeHtml(PAPERS[paperId].title)}</div>
+    return `<div class="conf-row" style="display:block;">
+      <div class="conf-label" style="margin-bottom:8px;">Paper ${i + 1}: ${escapeHtml(PAPERS[paperId].title)}</div>
       <div class="conf-scale" data-name="${name}">${btns}</div>
+      <div class="scale-ends">
+        <div class="scale-end">${escapeHtml(leftLabel)}</div>
+        <div class="scale-end right">${escapeHtml(rightLabel)}</div>
+      </div>
     </div>`;
   }).join('');
 }
 
-function prepareReflectionsPage(){
+function prepareReflectionsPage() {
   inTaskPhase = false;
   buildPaperScaleRows('confWrap', 'confidence');
   buildPaperScaleRows('understandWrap', 'understood');
-  if (DATA.condition === 'AI'){
+  if (DATA.condition === 'AI') {
     buildPerPaperAiReflections();
   }
 }
@@ -1466,47 +1529,84 @@ function prepareReflectionsPage(){
 // that apply" / "Overall, whose thinking..." wording (verbatim, not
 // per-paper). Field names are fixed ('ai_engagement', 'whose_thinking') and
 // picked up by collectFieldsNow()'s generic name-based collection.
-function buildPerPaperAiReflections(){
+function buildPerPaperAiReflections() {
   const wrap = document.getElementById('perPaperAiReflectionsWrap');
   if (!wrap) return;
+
   const wtName = 'whose_thinking';
-  wrap.innerHTML = `<div class="q-card">
-      <div class="q-label">How did you engage with the AI assistant during the previous task? Select all that apply.</div>
+
+  wrap.innerHTML = `
+    <div class="q-card">
+      <div class="q-label">
+        How did you engage with the AI assistant during the previous task? Select all that apply.
+      </div>
       <div class="options-grid" id="engageWrap"></div>
     </div>
+
     <div class="q-card">
-      <div class="q-label">Overall, whose thinking is reflected in your responses?</div>
-      <div class="q-sublabel">1 = Mostly the AI assistant's thinking     7 = Mostly my own thinking</div>
-      <div class="conf-scale" data-name="${wtName}">${(function(){
-        let btns = '';
-        for (let v=1; v<=7; v++){ btns += `<button type="button" class="conf-btn" data-name="${wtName}" data-val="${v}" onclick="selectConvincing(this)">${v}</button>`; }
-        return btns;
-      })()}</div>
-    </div>`;
-  renderRadioGroup('engageWrap', 'ai_engagement', ENGAGEMENT_OPTIONS, o => o.l, 'checkbox');
+      <div class="q-label">
+        Overall, whose thinking is reflected in your responses?
+      </div>
+
+      <div class="conf-scale" data-name="${wtName}">
+        ${(function () {
+      let btns = '';
+
+      for (let v = 1; v <= 7; v++) {
+        btns += `
+              <button
+                type="button"
+                class="conf-btn"
+                data-name="${wtName}"
+                data-val="${v}"
+                onclick="selectConvincing(this)"
+              >
+                ${v}
+              </button>
+            `;
+      }
+
+      return btns;
+    })()}
+      </div>
+
+      <div class="scale-ends">
+        <div class="scale-end">Mostly the AI assistant's thinking</div>
+        <div class="scale-end right">Mostly my own thinking</div>
+      </div>
+    </div>
+  `;
+
+  renderRadioGroup(
+    'engageWrap',
+    'ai_engagement',
+    ENGAGEMENT_OPTIONS,
+    o => o.l,
+    'checkbox'
+  );
 }
 
 // Exclusive-checkbox handling + selected-state styling
 document.addEventListener('change', (e) => {
   const t = e.target;
-  if (t.matches('.option-item input[type="radio"], .option-item input[type="checkbox"]')){
+  if (t.matches('.option-item input[type="radio"], .option-item input[type="checkbox"]')) {
     const item = t.closest('.option-item');
-    if (t.type === 'radio'){
+    if (t.type === 'radio') {
       document.querySelectorAll(`input[name="${t.name}"]`).forEach(inp => inp.closest('.option-item')?.classList.remove('selected'));
       item.classList.add('selected');
     } else {
       item.classList.toggle('selected', t.checked);
-      if (t.name.startsWith('ai_engagement')){
+      if (t.name.startsWith('ai_engagement')) {
         const opt = ENGAGEMENT_OPTIONS.find(o => o.l === t.value);
         const exclusiveVals = ENGAGEMENT_OPTIONS.filter(o => o.exclusive).map(o => o.l);
-        if (t.checked){
-          if (opt && opt.exclusive){
+        if (t.checked) {
+          if (opt && opt.exclusive) {
             document.querySelectorAll(`input[name="${t.name}"]`).forEach(inp => {
-              if (inp !== t){ inp.checked = false; inp.closest('.option-item')?.classList.remove('selected'); }
+              if (inp !== t) { inp.checked = false; inp.closest('.option-item')?.classList.remove('selected'); }
             });
           } else {
             document.querySelectorAll(`input[name="${t.name}"]`).forEach(inp => {
-              if (exclusiveVals.includes(inp.value)){ inp.checked = false; inp.closest('.option-item')?.classList.remove('selected'); }
+              if (exclusiveVals.includes(inp.value)) { inp.checked = false; inp.closest('.option-item')?.classList.remove('selected'); }
             });
           }
         }
@@ -1529,7 +1629,7 @@ document.addEventListener('change', (e) => {
 // any extra bookkeeping. PAPERS[paperId].title is read fresh for both the
 // transition page and every question (not just the first per paper) so the
 // title always reflects the paper the current page belongs to.
-function buildQuizPages(){
+function buildQuizPages() {
   const container = document.getElementById('quizPagesContainer');
   if (!container) return;
   QUIZ_PAGE_IDS = [];
@@ -1571,7 +1671,7 @@ function buildQuizPages(){
   container.innerHTML = html;
 }
 
-function finishQuiz(){
+function finishQuiz() {
   let score = 0, total = 0;
   DATA.study_order.forEach(paperId => {
     PAPERS[paperId].quiz.forEach((qObj, qi) => {
@@ -1588,7 +1688,7 @@ function finishQuiz(){
 }
 
 // ---------- Field collection ----------
-function collectFieldsNow(){
+function collectFieldsNow() {
   document.querySelectorAll('textarea[id]').forEach(ta => { DATA.responses[ta.id] = ta.value; });
   document.querySelectorAll('input[type="text"][id], input[type="number"][id]').forEach(inp => { DATA.responses[inp.id] = inp.value; });
   document.querySelectorAll('select[id]').forEach(sel => { DATA.responses[sel.id] = sel.value; });
@@ -1610,7 +1710,7 @@ function collectFieldsNow(){
 }
 
 // ---------- Export / Admin ----------
-function flattenForExport(){
+function flattenForExport() {
   const flat = {
     participant_id: DATA.participant_id,
     prolific_id: DATA.prolific_id,
@@ -1638,21 +1738,21 @@ function flattenForExport(){
   DATA.study_order.forEach((paperId, i) => {
     const t = DATA.timing[paperId] || {};
     const agg = DATA.ai_paper_aggregates[paperId] || {};
-    flat['study_' + (i+1) + '_id'] = paperId;
-    flat['study_' + (i+1) + '_title'] = PAPERS[paperId].title;
-    flat['study_' + (i+1) + '_duration_ms'] = t.duration_ms || '';
-    flat['study_' + (i+1) + '_ai_turns'] = DATA.ai_chats[paperId].filter(m => m.role==='user').length;
-    flat['study_' + (i+1) + '_ai_transcript'] = JSON.stringify(DATA.ai_chats[paperId]);
-    flat['study_' + (i+1) + '_ai_tab_opened'] = agg.tab_opened || false;
-    flat['study_' + (i+1) + '_ai_time_to_first_open_ms'] = agg.time_to_first_open_ms || '';
-    flat['study_' + (i+1) + '_ai_time_to_first_message_ms'] = agg.time_to_first_message_ms || '';
-    flat['study_' + (i+1) + '_ai_limit_reached'] = agg.limit_reached || false;
+    flat['study_' + (i + 1) + '_id'] = paperId;
+    flat['study_' + (i + 1) + '_title'] = PAPERS[paperId].title;
+    flat['study_' + (i + 1) + '_duration_ms'] = t.duration_ms || '';
+    flat['study_' + (i + 1) + '_ai_turns'] = DATA.ai_chats[paperId].filter(m => m.role === 'user').length;
+    flat['study_' + (i + 1) + '_ai_transcript'] = JSON.stringify(DATA.ai_chats[paperId]);
+    flat['study_' + (i + 1) + '_ai_tab_opened'] = agg.tab_opened || false;
+    flat['study_' + (i + 1) + '_ai_time_to_first_open_ms'] = agg.time_to_first_open_ms || '';
+    flat['study_' + (i + 1) + '_ai_time_to_first_message_ms'] = agg.time_to_first_message_ms || '';
+    flat['study_' + (i + 1) + '_ai_limit_reached'] = agg.limit_reached || false;
   });
   Object.assign(flat, DATA.responses);
   return flat;
 }
 
-function downloadBlob(content, filename, mime){
+function downloadBlob(content, filename, mime) {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1661,19 +1761,19 @@ function downloadBlob(content, filename, mime){
   URL.revokeObjectURL(url);
 }
 
-function downloadJSON(){
+function downloadJSON() {
   downloadBlob(JSON.stringify(DATA, null, 2), DATA.participant_id + '.json', 'application/json');
 }
 
-function downloadCSV(){
+function downloadCSV() {
   const flat = flattenForExport();
   const keys = Object.keys(flat);
-  const escapeCsv = (v) => '"' + String(v == null ? '' : v).replace(/"/g,'""') + '"';
+  const escapeCsv = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
   const csv = keys.join(',') + '\n' + keys.map(k => escapeCsv(flat[k])).join(',');
   downloadBlob(csv, DATA.participant_id + '.csv', 'text/csv');
 }
 
-function openAdminOverlay(){
+function openAdminOverlay() {
   const overlay = document.getElementById('adminOverlay');
   const pre = document.getElementById('adminPreview');
   if (pre) pre.textContent = JSON.stringify(DATA, null, 2);
@@ -1681,13 +1781,13 @@ function openAdminOverlay(){
 }
 
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'E'){
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'E') {
     openAdminOverlay();
   }
 });
 
 // ---------- Submission ----------
-async function submitToServer(){
+async function submitToServer() {
   try {
     const response = await fetch('/api/submit-survey', {
       method: 'POST',
@@ -1695,13 +1795,13 @@ async function submitToServer(){
       body: JSON.stringify(DATA)
     });
     if (!response.ok) throw new Error('submit-survey failed with status ' + response.status);
-  } catch (err){
+  } catch (err) {
     console.warn('submitToServer failed (endpoint may not be implemented yet):', err);
   }
 }
 
-function finalizeSubmission(){
-  if (document.fullscreenElement){
+function finalizeSubmission() {
+  if (document.fullscreenElement) {
     (document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen)?.call(document);
   }
   collectFieldsNow();
@@ -1710,14 +1810,14 @@ function finalizeSubmission(){
   DATA.completion_status = 'completed';
   DATA.final_submission_timestamp = nowIso();
   submitToServer();
-  currentIdx = pageOrder.indexOf('page-debrief');
-  showPage('page-debrief');
+  currentIdx = pageOrder.indexOf('page-submitted');
+  showPage('page-submitted');
 }
 
 // ---------- Autosave ----------
-function autosave(){
+function autosave() {
   collectFieldsNow();
-  try { localStorage.setItem('research_survey_autosave', JSON.stringify(DATA)); } catch(e){}
+  try { localStorage.setItem('research_survey_autosave', JSON.stringify(DATA)); } catch (e) { }
 }
 setInterval(autosave, 10000);
 
@@ -1738,17 +1838,17 @@ document.addEventListener('DOMContentLoaded', () => {
   showPage('page-consent');
   updateNav();
 
-  document.querySelectorAll('#page-reflections').forEach(() => {});
+  document.querySelectorAll('#page-reflections').forEach(() => { });
   const origNavigate = navigate;
   // Hook to build reflections content right when that page is about to show.
   const observer = new MutationObserver(() => {
     const reflPage = document.getElementById('page-reflections');
-    if (reflPage && reflPage.classList.contains('active') && !reflPage._prepared){
+    if (reflPage && reflPage.classList.contains('active') && !reflPage._prepared) {
       reflPage._prepared = true;
       prepareReflectionsPage();
     }
   });
-  observer.observe(document.body, { attributes:true, subtree:true, attributeFilter:['class'] });
+  observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class'] });
 
   const params = new URLSearchParams(window.location.search);
   if (params.get('admin') === '1') openAdminOverlay();
