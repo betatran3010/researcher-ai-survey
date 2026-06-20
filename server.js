@@ -8,6 +8,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -224,6 +225,171 @@ app.post('/api/chat', async (req, res) => {
   } catch (err) {
     console.error('[api/chat] Unexpected error', err);
     return res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// ---------- Stratified condition/CT-placement + paper-order assignment ----------
+// Deterministic, stateless, server-side assignment. No database, no file,
+// no in-memory counter — the assignment for a given participant is the
+// output of a pure function (a stable hash) of a STABLE identifier, recomputed
+// fresh on every request. This means:
+//   - It is automatically the same on every repeated request / refresh for
+//     the same stable_participant_id, with nothing to store or look up here.
+//   - Two participants on different computers, or arriving at the exact
+//     same instant, cannot interfere with each other — there is no shared
+//     mutable state for them to race over.
+// `stable_participant_id` is computed by the frontend as the participant's
+// normalized Prolific ID, or (only if no Prolific ID is available) a
+// fallback UUID it persists in localStorage — see getStableAssignmentId() in
+// researcher_ai_survey.js. This server endpoint just hashes whatever stable
+// id it's given; it does not know or care which source it came from (that's
+// recorded client-side as assignment_id_source for the submitted data).
+//
+// The tradeoff (see chat for full discussion): this gives APPROXIMATE
+// balance across the four cells within each stratum, not the exact
+// least-filled-cell balance a database-backed counter would give. With a
+// good hash (SHA-256) and a reasonably sized sample, the imbalance is small,
+// but for a small study (a few dozen participants per stratum) it is
+// possible to land further from a perfect split than a counter-based
+// design would ever allow.
+//
+// Research-expertise stratum is derived here from the exact role string,
+// not trusted from the client, and must match ROLE_OPTIONS in
+// researcher_ai_survey.js exactly.
+const ROLE_TIER_MAP = {
+  'Undergraduate research assistant': 'lower',
+  'Post-baccalaureate research assistant or lab manager': 'lower',
+  "Master's student": 'lower',
+  'First-year PhD student': 'lower',
+  'Second-year PhD student': 'higher',
+  'Third-year PhD student': 'higher',
+  'Fourth-year PhD student': 'higher',
+  'Fifth-year or later PhD student': 'higher',
+  'Postdoctoral scholar': 'higher'
+};
+
+// The four cells within each stratum. Index in this array is what hashed
+// values are mapped onto via modulo — order matters for reproducibility,
+// but is otherwise arbitrary.
+const ASSIGNMENT_CELLS = [
+  { ai_condition: 'AI', ct_placement: 'pre', cell: 'AI_pre' },
+  { ai_condition: 'AI', ct_placement: 'post', cell: 'AI_post' },
+  { ai_condition: 'noAI', ct_placement: 'pre', cell: 'noAI_pre' },
+  { ai_condition: 'noAI', ct_placement: 'post', cell: 'noAI_post' }
+];
+
+// The 3-paper pool, and every way to pick an ordered pair of 2 from it
+// (3 choices of which paper to drop x 2 orderings of the remaining two = 6).
+// Kept in sync with PAPER_IDS / PAPERS in researcher_ai_survey.js.
+const PAPER_COMBOS = [
+  { order: ['font', 'food'], unassigned: 'listing' },
+  { order: ['food', 'font'], unassigned: 'listing' },
+  { order: ['font', 'listing'], unassigned: 'food' },
+  { order: ['listing', 'font'], unassigned: 'food' },
+  { order: ['food', 'listing'], unassigned: 'font' },
+  { order: ['listing', 'food'], unassigned: 'font' }
+];
+
+// Bump ASSIGNMENT_VERSION / PAPER_ORDER_VERSION if the respective
+// hashing/mapping logic ever changes in a way that should NOT silently
+// reassign already-collected participants under the old logic — changing
+// the version string changes every future assignment for that piece, which
+// is the intended "versioning" escape hatch. They're independent: changing
+// one does not affect the other.
+const ASSIGNMENT_VERSION = 'v1';
+const PAPER_ORDER_VERSION = 'v1';
+const ASSIGNMENT_SOURCE = 'deterministic_server_hash';
+
+// Stable, uniform-ish 32-bit integer from an arbitrary string, via SHA-256.
+// SHA-256 is a cryptographic hash, so its output bits are effectively
+// uniformly distributed regardless of patterns in the input (e.g. sequential
+// participant IDs) — this is what makes `% N` an approximately even split
+// across N buckets for a large enough sample.
+function stableHashInt(str) {
+  const hex = crypto.createHash('sha256').update(str).digest('hex');
+  return parseInt(hex.slice(0, 8), 16); // top 32 bits, as an unsigned int
+}
+
+// Canonical normalization for whatever identifier is being hashed (Prolific
+// ID or fallback UUID): trim whitespace and lowercase, so "ABC123", "abc123",
+// and " abc123 " all hash identically. This is the server's responsibility —
+// it must not depend on the client having normalized consistently, since the
+// server is the only source of truth for the actual assignment.
+function normalizeStableId(raw) {
+  return String(raw).trim().toLowerCase();
+}
+
+// One-way digest of the normalized stable id, used ONLY for what gets stored/
+// exported in participant data. We never write the raw Prolific ID a second
+// time under a different field name — DATA.prolific_id (entered by the
+// participant) is the sole plaintext copy; this hash lets you verify
+// reproducibility (same input -> same hash) without duplicating the PII.
+function hashStableId(normalizedId) {
+  return crypto.createHash('sha256').update(normalizedId).digest('hex');
+}
+
+app.post('/api/assign-condition', (req, res) => {
+  try {
+    const rawStableId = req.body && req.body.stable_participant_id;
+    const research_role = req.body && req.body.research_role;
+
+    if (!isNonEmptyString(rawStableId) || rawStableId.length > 200) {
+      return res.status(400).json({ error: 'Invalid stable_participant_id.' });
+    }
+    const stable_participant_id = normalizeStableId(rawStableId);
+    if (!stable_participant_id) {
+      return res.status(400).json({ error: 'Invalid stable_participant_id.' });
+    }
+    // Expertise stratum is derived here from the exact, server-side
+    // ROLE_TIER_MAP lookup of the submitted role string — the client never
+    // sends a stratum, and nothing here trusts one even if it did.
+    const expertise_stratum = ROLE_TIER_MAP[research_role];
+    if (!expertise_stratum) {
+      return res.status(400).json({ error: 'Invalid or unrecognized research_role.' });
+    }
+
+    // Condition/CT-placement cell: hash of (stable id, stratum, version) mod
+    // 4. Salting with the stratum means the lower/higher strata are
+    // independent hash spaces, so neither one's distribution affects the
+    // other's.
+    const cellIndex = stableHashInt(`${stable_participant_id}|${expertise_stratum}|${ASSIGNMENT_VERSION}`) % ASSIGNMENT_CELLS.length;
+    const chosen = ASSIGNMENT_CELLS[cellIndex];
+
+    // Paper selection/order: a SEPARATE deterministic hash of (stable id,
+    // paper-order version) mod 6 — independent of the condition/CT draw
+    // above (different input, no shared salt), but still a pure function of
+    // the same stable id, so it's equally stable across repeated requests.
+    const comboIndex = stableHashInt(`${stable_participant_id}|${PAPER_ORDER_VERSION}`) % PAPER_COMBOS.length;
+    const combo = PAPER_COMBOS[comboIndex];
+
+    // stable_assignment_id_hash is a one-way SHA-256 digest of the normalized
+    // id — NOT the raw Prolific ID/UUID. The frontend stores this (not the
+    // raw value a second time) so participant data never contains the same
+    // plaintext identifier under two different field names.
+    const stable_assignment_id_hash = hashStableId(stable_participant_id);
+
+    const response = {
+      stable_assignment_id_hash,
+      research_role,
+      research_expertise_stratum: expertise_stratum,
+      ai_condition: chosen.ai_condition,
+      critical_thinking_placement: chosen.ct_placement,
+      assignment_cell: chosen.cell,
+      assigned_at: new Date().toISOString(),
+      assignment_source: ASSIGNMENT_SOURCE,
+      assignment_version: ASSIGNMENT_VERSION,
+      paper_order_version: PAPER_ORDER_VERSION,
+      paper_order: combo.order,
+      unassigned_paper_id: combo.unassigned
+    };
+
+    // Server logs (console only — never written into participant data/export)
+    // can reference the normalized id directly for debugging.
+    console.log('[api/assign-condition]', { stable_participant_id, expertise_stratum, cell: chosen.cell, paper_order: combo.order });
+    return res.json(response);
+  } catch (err) {
+    console.error('[api/assign-condition] Unexpected error', err);
+    return res.status(500).json({ error: 'Could not assign condition. Please retry.' });
   }
 });
 

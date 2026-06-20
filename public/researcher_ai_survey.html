@@ -638,6 +638,41 @@
       font-weight: 600;
     }
 
+    .assignment-status {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      font-size: .86rem;
+      font-weight: 600;
+    }
+
+    .assignment-status.loading { color: var(--warm-gray); }
+    .assignment-status.error { color: #b3261e; }
+
+    .assignment-spinner {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid rgba(0, 0, 0, .15);
+      border-top-color: var(--terra);
+      animation: assignment-spin .7s linear infinite;
+    }
+
+    @keyframes assignment-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .assignment-retry-btn {
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid #b3261e;
+      background: #fff;
+      color: #b3261e;
+      font-weight: 700;
+      font-size: .82rem;
+      cursor: pointer;
+    }
+
     .btn {
       padding: 13px 26px;
       border-radius: 12px;
@@ -1956,6 +1991,11 @@
   <!-- ============ NAV (Back button intentionally omitted — navigation is forward-only) ============ -->
   <div class="nav-bar">
     <span class="nav-label" id="navStep"></span>
+    <span class="assignment-status" id="assignmentStatus">
+      <span class="assignment-spinner" id="assignmentSpinner"></span>
+      <span id="assignmentStatusText"></span>
+      <button type="button" class="assignment-retry-btn" id="assignmentRetryBtn" style="display:none;" onclick="retryAssignment()">Retry</button>
+    </span>
     <button class="btn btn-primary" id="btnNext" onclick="navigate(1)">Continue &rarr;</button>
   </div>
 

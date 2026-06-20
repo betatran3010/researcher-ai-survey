@@ -39,6 +39,15 @@ const DATA = {
   research_expertise_stratum: null, // mirrors expertise_tier
   ai_condition: null,               // mirrors condition
   critical_thinking_placement: null,// mirrors ct_scale_placement
+  research_role: null,              // exact selected role string, as returned by the server
+  assignment_cell: null,            // combined cell label, e.g. "AI_pre" — authoritative, server-generated
+  assignment_assigned_at: null,     // server timestamp the assignment was made
+  assignment_source: null,          // assignment method, e.g. "deterministic_server_hash"
+  assignment_version: null,         // version tag baked into the server's condition/CT hash input (e.g. "v1")
+  stable_assignment_id_hash: null,  // one-way SHA-256 digest (server-computed) of the normalized id actually hashed for assignment (prolific_id or fallback UUID) — NOT the raw value, so it is never the same plaintext as prolific_id under a second field name
+  assignment_id_source: null,       // 'prolific_id' | 'generated_fallback'
+  role_locked_to_original: false,   // true if a role change on this browser was overridden to keep the original assignment stable
+  paper_order_version: null,        // version tag baked into the server's paper-order hash input (e.g. "v1")
   assigned_paper_1_id: null, assigned_paper_1_title: null,
   assigned_paper_2_id: null, assigned_paper_2_title: null,
   unassigned_paper_id: null,
@@ -387,37 +396,160 @@ function applySectionNumbers() {
   });
 }
 
+// ---------- Stable participant identifier (for assignment only) ----------
+// DATA.participant_id (genId(), above) is a per-page-load session/logging
+// id — it's used to tag chat transcripts, behavioral events, etc., and is
+// deliberately left unchanged. Condition/CT-placement and paper-order
+// assignment instead need an id that is stable across refreshes and repeat
+// visits, so they use a SEPARATE id computed here:
+//   - the participant's entered Prolific ID, normalized (trimmed), when
+//     available — this is the natural stable identifier for a real
+//     Prolific-recruited participant and is already collected (and
+//     required) on the consent page, before assignment ever runs; or
+//   - for local testing/dev, or any case where no Prolific ID was entered, a
+//     fallback UUID generated once and persisted in localStorage so it
+//     survives refreshes on the same browser.
+// This localStorage use is just an id cache, not a sample-balancing counter
+// — nothing here is read by the assignment logic to decide cell counts.
+const FALLBACK_ID_STORAGE_KEY = 'research_survey_fallback_participant_id';
+const ASSIGNMENT_CACHE_PREFIX = 'research_survey_assignment_cache_';
+
+// Trim + lowercase, matching the server's normalizeStableId() exactly, so a
+// same-browser localStorage cache lookup (keyed on this value) lines up with
+// however the server would normalize the same id, even if the participant
+// types it with different capitalization across visits. The server remains
+// the authoritative normalization for the actual hash/assignment.
+function normalizeProlificId(raw) {
+  return (raw || '').trim().toLowerCase();
+}
+
+function getOrCreateFallbackId() {
+  try {
+    let id = localStorage.getItem(FALLBACK_ID_STORAGE_KEY);
+    if (!id) {
+      id = (window.crypto && typeof window.crypto.randomUUID === 'function')
+        ? window.crypto.randomUUID()
+        : ('fallback-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+      localStorage.setItem(FALLBACK_ID_STORAGE_KEY, id);
+    }
+    return id;
+  } catch (e) {
+    // localStorage unavailable (e.g. private browsing in some browsers) —
+    // degrade to a per-call id; this only affects refresh-stability for the
+    // no-Prolific-ID case, never the normal Prolific-ID path.
+    return (window.crypto && typeof window.crypto.randomUUID === 'function')
+      ? window.crypto.randomUUID()
+      : genId();
+  }
+}
+
+// Returns { id, source } where source is 'prolific_id' or 'generated_fallback'.
+function getStableAssignmentId() {
+  const prolific = normalizeProlificId(DATA.prolific_id);
+  if (prolific) return { id: prolific, source: 'prolific_id' };
+  return { id: getOrCreateFallbackId(), source: 'generated_fallback' };
+}
+
+function readAssignmentCache(stableId) {
+  try {
+    const raw = localStorage.getItem(ASSIGNMENT_CACHE_PREFIX + stableId);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeAssignmentCache(stableId, record) {
+  try {
+    localStorage.setItem(ASSIGNMENT_CACHE_PREFIX + stableId, JSON.stringify(record));
+  } catch (e) {
+    // Non-fatal: the assignment itself still came from the server and is
+    // stored in DATA; only the same-browser role-change guard degrades.
+  }
+}
+
 // ---------- Stratified random assignment ----------
-// Assignment happens exactly once, immediately after the About You page, and
-// is then frozen for the rest of the session by being written into DATA
-// (which autosave() persists to localStorage every 10s and restoreAssignmentIfPresent()
-// can read back). This makes the assignment immune to refresh, resize,
-// tab-switch, or page navigation, since none of those re-run this function.
-function assignConditionAndOrder() {
-  const tier = DATA.expertise_tier;
-  const counterKey = 'strat_counter_' + tier;
-  let counter = 0;
-  try { counter = parseInt(localStorage.getItem(counterKey) || '0', 10); } catch (e) { }
-  const condition = (counter % 2 === 0) ? 'AI' : 'noAI';
-  try { localStorage.setItem(counterKey, String(counter + 1)); } catch (e) { }
-  DATA.condition = condition;
-  DATA.ai_condition = condition;
-  document.body.classList.add(condition === 'AI' ? 'condition-ai' : 'condition-noai');
+// Assignment happens exactly once per page-about-you visit, and is then
+// frozen for the rest of the session by being written into DATA. A full
+// browser refresh currently restarts the page flow from consent (existing,
+// unchanged behavior — see DEPLOYMENT.md), but assignment itself is stable
+// across that restart: it's a pure function of the STABLE id above (not the
+// per-load DATA.participant_id), so re-entering the same Prolific ID (or
+// having the fallback UUID restored from localStorage) and re-submitting
+// About You reproduces the identical condition, CT placement, and paper
+// selection/order every time.
+//
+// Requests the participant's condition/CT-placement/paper assignment from
+// the server. The server is the ONLY source of truth for the actual
+// hashing/mapping — see /api/assign-condition in server.js. This function
+// does NOT compute an assignment itself and does NOT fall back to a
+// random/local assignment on failure: per the study design, a participant
+// must not proceed past the About You page without a valid server-issued
+// assignment, so failures are thrown for the caller (requestAssignmentWithUI,
+// below) to surface as a recoverable error with a Retry button.
+async function assignConditionAndOrder(researchRole) {
+  const { id: stableId, source: idSource } = getStableAssignmentId();
 
-  // CT placement is counterbalanced independently WITHIN each tier+condition
-  // cell (4 cells total: lower/higher x AI/noAI), alternating pre/post.
-  const ctKey = 'strat_ct_counter_' + tier + '_' + condition;
-  let ctCounter = 0;
-  try { ctCounter = parseInt(localStorage.getItem(ctKey) || '0', 10); } catch (e) { }
-  DATA.ct_scale_placement = (ctCounter % 2 === 0) ? 'pre' : 'post';
-  DATA.critical_thinking_placement = DATA.ct_scale_placement;
-  try { localStorage.setItem(ctKey, String(ctCounter + 1)); } catch (e) { }
+  // Best-effort, same-browser guard against re-rolling the assignment by
+  // changing role/stratum after already being assigned: if this stable id
+  // already has a cached assignment on this browser and the role no longer
+  // matches, use the ORIGINALLY recorded role for the request instead of
+  // the newly selected one. (This cannot detect a role change made from a
+  // different browser/device for the same Prolific ID — doing that would
+  // require a shared server-side store, which is explicitly out of scope
+  // here. The cell itself is keyed by expertise STRATUM, not exact role
+  // text, so this only matters when a changed role would cross strata.)
+  const cached = readAssignmentCache(stableId);
+  let effectiveRole = researchRole;
+  let roleLockedToOriginal = false;
+  if (cached && cached.research_role && cached.research_role !== researchRole) {
+    effectiveRole = cached.research_role;
+    roleLockedToOriginal = true;
+  }
 
-  // Select 2 of the 3 pool papers without replacement, in randomized
-  // presentation order; the third stays unassigned for this participant.
-  const shuffledPool = fisherYates([...PAPER_IDS]);
-  const order = shuffledPool.slice(0, 2);
-  const unassigned = shuffledPool[2];
+  const resp = await fetch('/api/assign-condition', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      stable_participant_id: stableId,
+      research_role: effectiveRole
+    })
+  });
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error(errBody.error || ('assign-condition request failed: ' + resp.status));
+  }
+  const data = await resp.json();
+
+  // Authoritative, server-generated assignment. Frontend only stores/uses
+  // these values, never generates or alters them. Note: we store the
+  // server-returned ONE-WAY HASH of the stable id (data.stable_assignment_id_hash),
+  // not the raw stableId variable above — the raw Prolific ID is already
+  // recorded once in DATA.prolific_id, so this avoids writing the same
+  // plaintext identifier into participant data under a second field name.
+  DATA.stable_assignment_id_hash = data.stable_assignment_id_hash;
+  DATA.assignment_id_source = idSource;
+  DATA.role_locked_to_original = roleLockedToOriginal;
+  DATA.research_role = data.research_role;
+  DATA.research_expertise_stratum = data.research_expertise_stratum;
+  DATA.expertise_tier = data.research_expertise_stratum; // legacy alias, kept for any export logic that still reads it
+  DATA.ai_condition = data.ai_condition;
+  DATA.condition = data.ai_condition; // legacy alias
+  DATA.critical_thinking_placement = data.critical_thinking_placement;
+  DATA.ct_scale_placement = data.critical_thinking_placement; // legacy alias
+  DATA.assignment_cell = data.assignment_cell;
+  DATA.assignment_assigned_at = data.assigned_at;
+  DATA.assignment_source = data.assignment_source;
+  DATA.assignment_version = data.assignment_version;
+  DATA.paper_order_version = data.paper_order_version;
+
+  document.body.classList.add(DATA.ai_condition === 'AI' ? 'condition-ai' : 'condition-noai');
+
+  // Paper selection/order is now ALSO a deterministic server hash (separate
+  // from the condition/CT hash above), keyed by the same stable id, so it
+  // survives refresh/repeat requests exactly like the condition does.
+  const order = data.paper_order;
+  const unassigned = data.unassigned_paper_id;
 
   DATA.study_order = order;
   DATA.study_1_id = order[0]; DATA.study_2_id = order[1];
@@ -428,14 +560,74 @@ function assignConditionAndOrder() {
   DATA.assigned_paper_1_id = order[0]; DATA.assigned_paper_1_title = PAPERS[order[0]].title;
   DATA.assigned_paper_2_id = order[1]; DATA.assigned_paper_2_title = PAPERS[order[1]].title;
   DATA.unassigned_paper_id = unassigned;
+
+  writeAssignmentCache(stableId, {
+    research_role: DATA.research_role,
+    research_expertise_stratum: DATA.research_expertise_stratum,
+    ai_condition: DATA.ai_condition,
+    critical_thinking_placement: DATA.critical_thinking_placement,
+    assignment_cell: DATA.assignment_cell,
+    assignment_assigned_at: DATA.assignment_assigned_at,
+    assignment_source: DATA.assignment_source,
+    assignment_version: DATA.assignment_version,
+    paper_order_version: DATA.paper_order_version,
+    stable_assignment_id_hash: DATA.stable_assignment_id_hash,
+    study_order: DATA.study_order,
+    unassigned_paper_id: DATA.unassigned_paper_id
+  });
 }
 
-function fisherYates(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+// ---------- Assignment loading/error UI ----------
+// Shows a brief loading state while /api/assign-condition is in flight, and
+// a recoverable error + Retry button if it fails, per spec: the participant
+// must not be able to proceed to condition-dependent sections until a valid
+// server assignment has been returned.
+function setAssignmentStatus(mode, message) {
+  const wrap = document.getElementById('assignmentStatus');
+  const spinner = document.getElementById('assignmentSpinner');
+  const text = document.getElementById('assignmentStatusText');
+  const retryBtn = document.getElementById('assignmentRetryBtn');
+  if (!wrap) return;
+  if (mode === 'hidden') {
+    wrap.style.display = 'none';
+    return;
   }
-  return arr;
+  wrap.style.display = 'flex';
+  wrap.classList.remove('loading', 'error');
+  wrap.classList.add(mode);
+  if (spinner) spinner.style.display = (mode === 'loading') ? 'inline-block' : 'none';
+  if (text) text.textContent = message || '';
+  if (retryBtn) retryBtn.style.display = (mode === 'error') ? 'inline-block' : 'none';
+}
+
+// Holds the role selected at the moment Continue was clicked, so the Retry
+// button can re-run the exact same request without re-reading the form.
+let pendingAssignmentRole = null;
+
+async function requestAssignmentWithUI() {
+  const btnNext = document.getElementById('btnNext');
+  setAssignmentStatus('loading', 'Assigning your condition…');
+  if (btnNext) btnNext.disabled = true;
+  try {
+    await assignConditionAndOrder(pendingAssignmentRole);
+    setAssignmentStatus('hidden');
+    return true;
+  } catch (err) {
+    console.error('[requestAssignmentWithUI] /api/assign-condition failed:', err);
+    setAssignmentStatus('error', 'Could not assign your condition. Please check your connection and retry.');
+    if (btnNext) btnNext.disabled = false;
+    return false;
+  }
+}
+
+async function retryAssignment() {
+  if (navigateInFlight) return;
+  navigateInFlight = true;
+  const ok = await requestAssignmentWithUI();
+  navigateInFlight = false;
+  if (!ok) return;
+  finalizeAboutYou();
+  advanceFromIndex(pageOrder.indexOf('page-about-you'), 1);
 }
 
 // ---------- Navigation ----------
@@ -507,8 +699,14 @@ function getCurrentPageId() {
 }
 
 let currentStudyPaperId = null;
+let navigateInFlight = false;
 
-function navigate(dir) {
+async function navigate(dir) {
+  // Guards the page-about-you branch below, which now awaits a network
+  // round-trip (assignConditionAndOrder -> /api/assign-condition). Without
+  // this, a double-click on Continue could fire two concurrent assignment
+  // requests for the same participant.
+  if (navigateInFlight) return;
   if (!validateCurrentPage()) return;
   const curId = getCurrentPageId();
   const idx = pageOrder.indexOf(curId);
@@ -526,17 +724,35 @@ function navigate(dir) {
   collectFieldsNow();
 
   if (curId === 'page-about-you' && dir > 0) {
+    // Gate: do not allow the participant to proceed until the server has
+    // returned a valid assignment. requestAssignmentWithUI() shows a loading
+    // state, then either succeeds (we continue below) or shows an inline
+    // error + Retry button and leaves the participant on this page.
+    navigateInFlight = true;
+    const roleVal = document.querySelector('input[name="ay_role"]:checked');
+    pendingAssignmentRole = roleVal ? roleVal.value : null;
+    const ok = await requestAssignmentWithUI();
+    navigateInFlight = false;
+    if (!ok) return;
     finalizeAboutYou();
   }
 
+  advanceFromIndex(idx, dir);
+}
+
+// Shared "go to the next/previous page" logic, used both by the normal
+// navigate() flow and by retryAssignment() (which needs to resume the
+// page-about-you -> next-page transition after a successful retry, without
+// re-running the validation/finalize steps above it in navigate()).
+function advanceFromIndex(idx, dir) {
   let nextIdx = idx + dir;
   if (nextIdx < 0) nextIdx = 0;
   if (nextIdx >= pageOrder.length) {
     finalizeSubmission();
     return;
   }
+  const curId = pageOrder[idx];
   currentIdx = nextIdx;
-  const nextId = pageOrder[currentIdx];
 
   if (curId === 'page-instructions' && dir > 0) {
     enterFullscreenAndStart();
@@ -550,12 +766,11 @@ function navigate(dir) {
   showPage(pageOrder[currentIdx]);
 }
 
+// Builds everything that depends on the assignment just received from the
+// server (condition-specific page order/sections/instructions/study pages).
+// Pure/local — no network call here; assignConditionAndOrder() already ran
+// inside requestAssignmentWithUI() before this is called.
 function finalizeAboutYou() {
-  const roleVal = document.querySelector('input[name="ay_role"]:checked');
-  const roleObj = roleVal ? ROLE_OPTIONS.find(o => o.l === roleVal.value) : null;
-  DATA.expertise_tier = roleObj ? roleObj.tier : 'lower';
-  DATA.research_expertise_stratum = DATA.expertise_tier;
-  assignConditionAndOrder();
   buildPageOrder();
   renderAllSections();
   buildInstructionsText();
@@ -1797,6 +2012,15 @@ function flattenForExport() {
     ai_condition: DATA.ai_condition,
     ct_scale_placement: DATA.ct_scale_placement,
     critical_thinking_placement: DATA.critical_thinking_placement,
+    research_role: DATA.research_role,
+    assignment_cell: DATA.assignment_cell,
+    assignment_assigned_at: DATA.assignment_assigned_at,
+    assignment_source: DATA.assignment_source,
+    assignment_version: DATA.assignment_version,
+    stable_assignment_id_hash: DATA.stable_assignment_id_hash,
+    assignment_id_source: DATA.assignment_id_source,
+    role_locked_to_original: DATA.role_locked_to_original,
+    paper_order_version: DATA.paper_order_version,
     study_order: DATA.study_order.join(','),
     paper_order: DATA.paper_order.join(','),
     unassigned_paper_id: DATA.unassigned_paper_id,
