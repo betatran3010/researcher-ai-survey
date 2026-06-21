@@ -60,6 +60,7 @@ const DATA = {
   ai_message_log: [],
   behavioral_events: [],
   revision_log: [],
+  copy_events: [],
   paste_events: [],
   draft_history: [],
   keystroke_counts: {},
@@ -207,12 +208,17 @@ const CT_ITEMS_LIST = (function () {
   return out;
 })();
 
-// Spec section 8 says to insert the identical "How You Evaluate Research
-// Claims" section for the after-task placement, so pre and post share one
-// intro string rather than separate wording.
-const CT_INTRO = 'Please indicate how well each statement describes the way you typically evaluate research claims, evidence, or explanations. Answer based on how you usually behave, not how you think you should behave. There are no right or wrong answers.';
-const CT_INTRO_PRE = CT_INTRO;
-const CT_INTRO_POST = CT_INTRO;
+// The critical-thinking items are identical in the pre- and post-task
+// placements, but the introductory wording differs by placement.
+const CT_INTRO_PRE = [
+  'Please indicate how well each statement describes the way you typically evaluate research claims, evidence, or explanations. Answer based on how you usually behave, not how you think you should behave. There are no right or wrong answers.'
+];
+
+const CT_INTRO_POST = [
+  'Before finishing, we would like to ask a few general questions about how you typically evaluate research information.',
+  'The following questions ask about your general habits when evaluating research claims, evidence, and explanations. Please answer based on how you usually approach these kinds of tasks, rather than only on the studies you completed today or how you think you should respond. There are no right or wrong answers.'
+];
+
 const CT_SCALE_NOTE = '1 = Not at all true for me, 7 = Very true for me';
 
 // Spec section 6, "Standardized In-Task Questions For Each Assigned Study" —
@@ -379,7 +385,6 @@ function buildPageOrder() {
   if (DATA.ct_scale_placement === 'post') order.push('page-ct');
   order.push('page-quiz-intro');
   order.push(...QUIZ_PAGE_IDS);
-  order.push('page-debrief');
   order.push('page-debrief', 'page-submitted');
   pageOrder = order;
   applySectionNumbers();
@@ -998,16 +1003,19 @@ function renderAllSections() {
   // Critical-Thinking shared template
   const ctIntroEl = document.getElementById('ctIntroText');
   if (ctIntroEl) {
-    const introText = (DATA.ct_scale_placement === 'pre') ? CT_INTRO_PRE : CT_INTRO_POST;
-    ctIntroEl.innerHTML = `<p class="muted" style="margin-bottom:16px;">${escapeHtml(introText)}</p>`;
-  }
-  renderScale7Block(
-    'ctWrap',
-    CT_ITEMS_LIST.map(o => [o.key, o.label]),
-    'Not at all true for me',
-    'Very true for me'
-  );
+    const introParagraphs =
+      DATA.ct_scale_placement === 'pre'
+        ? CT_INTRO_PRE
+        : CT_INTRO_POST;
 
+    ctIntroEl.innerHTML = introParagraphs
+      .map((text, index) => `
+      <p class="muted" style="margin-bottom:${index === introParagraphs.length - 1 ? '16px' : '10px'};">
+        ${escapeHtml(text)}
+      </p>
+    `)
+      .join('');
+  }
 
   // AI Experience
   renderRadioGroup('rg-ai-purpose', 'ai_purpose', AI_PURPOSE_OPTIONS, o => o.l, 'checkbox');
@@ -1393,8 +1401,13 @@ function renderAIMessages(paperId) {
   // reply was rendered, because this function is called from sendAIMessage's
   // `finally` block. The indicator is owned solely by sendAIMessage via a
   // direct DOM element reference (see createThinkingMessage / aiThinkingEls).
-  wrap.innerHTML = DATA.ai_chats[paperId].map(m => `
-  <div class="ai-msg ${m.role}">
+  wrap.innerHTML = DATA.ai_chats[paperId].map((m, messageIndex) => `
+  <div
+    class="ai-msg ${m.role}"
+    data-paper-id="${paperId}"
+    data-message-index="${messageIndex}"
+    data-message-role="${m.role}"
+  >
     <span class="ai-msg-role">${m.role === 'user' ? 'You' : 'AI Assistant'}</span>
     <div class="ai-msg-content">
       ${m.role === 'assistant'
@@ -1736,10 +1749,8 @@ function attachLoggingListeners() {
     if (!DATA.logs[id]) DATA.logs[id] = { keystrokes: 0, pastes: 0, drafts: [] };
     ta._revisionSnapshot = ta.value || '';
     ta.addEventListener('keydown', () => { DATA.logs[id].keystrokes++; });
-    ta.addEventListener('paste', (e) => {
+    ta.addEventListener('paste', () => {
       DATA.logs[id].pastes++;
-      const pasted = (e.clipboardData || window.clipboardData).getData('text');
-      DATA.paste_events.push({ field: id, ts: nowIso(), length: pasted.length });
     });
     ta.addEventListener('input', () => {
       clearTimeout(ta._revisionTimer);
@@ -1767,6 +1778,322 @@ function attachLoggingListeners() {
     });
   });
 }
+
+// ---------- Clipboard-transfer logging ----------
+// Tracks meaningful transfers among task questions, participant answers,
+// AI prompts, and AI responses. Clipboard text is retained only temporarily
+// in memory so a later paste can be classified. The actual copied/pasted
+// text is never stored in DATA.
+
+const INTERNAL_COPY_MATCH_WINDOW_MS = 2 * 60 * 1000;
+
+let lastInternalCopy = null;
+
+function normalizeClipboardText(text) {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getElementFromCopyEvent(event) {
+  const target = event.target;
+
+  // Text selected inside a textarea/input does not appear in
+  // window.getSelection(), so use the event target directly.
+  if (
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLInputElement
+  ) {
+    return target;
+  }
+
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || !selection.anchorNode) {
+    return target instanceof Element ? target : null;
+  }
+
+  return selection.anchorNode.nodeType === Node.ELEMENT_NODE
+    ? selection.anchorNode
+    : selection.anchorNode.parentElement;
+}
+
+function getSelectedTextForCopy(event) {
+  const target = event.target;
+
+  if (
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLInputElement
+  ) {
+    const start = target.selectionStart;
+    const end = target.selectionEnd;
+
+    if (
+      typeof start === 'number' &&
+      typeof end === 'number' &&
+      end > start
+    ) {
+      return target.value.slice(start, end);
+    }
+
+    return '';
+  }
+
+  const selection = window.getSelection();
+  return selection ? selection.toString() : '';
+}
+
+function getPaperIdFromElement(element) {
+  if (!element) return currentStudyPaperId || null;
+
+  const explicitPaperElement = element.closest('[data-paper-id]');
+  if (explicitPaperElement) {
+    return explicitPaperElement.getAttribute('data-paper-id');
+  }
+
+  const answerField = element.closest('textarea[data-logfield]');
+  if (answerField) {
+    return fieldIdToPaperId(answerField.getAttribute('data-logfield'));
+  }
+
+  const aiInput = element.closest('textarea[id^="aiInput-"]');
+  if (aiInput) {
+    return aiInput.id.replace('aiInput-', '');
+  }
+
+  return currentStudyPaperId || null;
+}
+
+function inferQuestionId(questionElement) {
+  if (!questionElement) return null;
+
+  const card = questionElement.closest('.q-card');
+  if (!card) return null;
+
+  const textarea = card.querySelector('textarea[data-logfield]');
+  if (textarea) return textarea.getAttribute('data-logfield');
+
+  const scale = card.querySelector('[data-name]');
+  if (scale) return scale.getAttribute('data-name');
+
+  return null;
+}
+
+function classifyCopySource(element) {
+  if (!element) {
+    return {
+      source_type: 'external_or_unknown',
+      source_id: null,
+      paper_id: currentStudyPaperId || null
+    };
+  }
+
+  const assistantMessage = element.closest('.ai-msg.assistant');
+  if (assistantMessage) {
+    return {
+      source_type: 'ai_response',
+      source_id:
+        'ai_message_' +
+        assistantMessage.getAttribute('data-message-index'),
+      paper_id:
+        assistantMessage.getAttribute('data-paper-id') ||
+        currentStudyPaperId ||
+        null
+    };
+  }
+
+  const userAiMessage = element.closest('.ai-msg.user');
+  if (userAiMessage) {
+    return {
+      source_type: 'participant_ai_prompt',
+      source_id:
+        'ai_message_' +
+        userAiMessage.getAttribute('data-message-index'),
+      paper_id:
+        userAiMessage.getAttribute('data-paper-id') ||
+        currentStudyPaperId ||
+        null
+    };
+  }
+
+  const answerField = element.closest('textarea[data-logfield]');
+  if (answerField) {
+    const fieldId = answerField.getAttribute('data-logfield');
+
+    return {
+      source_type: 'participant_answer',
+      source_id: fieldId,
+      paper_id: fieldIdToPaperId(fieldId)
+    };
+  }
+
+  const aiInput = element.closest('textarea[id^="aiInput-"]');
+  if (aiInput) {
+    return {
+      source_type: 'ai_input_draft',
+      source_id: aiInput.id,
+      paper_id: aiInput.id.replace('aiInput-', '')
+    };
+  }
+
+  const question = element.closest('.q-label');
+  if (question) {
+    return {
+      source_type: 'question',
+      source_id: inferQuestionId(question),
+      paper_id: getPaperIdFromElement(question)
+    };
+  }
+
+  return {
+    source_type: 'other_internal',
+    source_id: element.id || null,
+    paper_id: getPaperIdFromElement(element)
+  };
+}
+
+function classifyPasteTarget(element) {
+  if (!element) return null;
+
+  const answerField = element.closest('textarea[data-logfield]');
+  if (answerField) {
+    const fieldId = answerField.getAttribute('data-logfield');
+
+    return {
+      target_type: 'participant_answer',
+      target_id: fieldId,
+      paper_id: fieldIdToPaperId(fieldId)
+    };
+  }
+
+  const aiInput = element.closest('textarea[id^="aiInput-"]');
+  if (aiInput) {
+    return {
+      target_type: 'ai_input',
+      target_id: aiInput.id,
+      paper_id: aiInput.id.replace('aiInput-', '')
+    };
+  }
+
+  return null;
+}
+
+function inferTransferPathway(sourceType, targetType) {
+  const sourceLabels = {
+    question: 'question',
+    participant_answer: 'answer',
+    ai_response: 'ai_response',
+    participant_ai_prompt: 'ai_prompt',
+    ai_input_draft: 'ai_input_draft',
+    other_internal: 'other_internal',
+    external_or_unknown: 'external_or_unknown'
+  };
+
+  const targetLabels = {
+    participant_answer: 'answer',
+    ai_input: 'ai'
+  };
+
+  const source = sourceLabels[sourceType] || 'external_or_unknown';
+  const target = targetLabels[targetType] || 'unknown';
+
+  return source + '_to_' + target;
+}
+
+document.addEventListener('copy', event => {
+  if (!inTaskPhase) return;
+
+  const copiedText = getSelectedTextForCopy(event);
+  const normalizedText = normalizeClipboardText(copiedText);
+
+  if (!normalizedText) return;
+
+  const element = getElementFromCopyEvent(event);
+  const source = classifyCopySource(element);
+  const timestamp = nowIso();
+
+  // Temporarily retain text only for matching a subsequent paste.
+  // It is not written into DATA or submitted to the server.
+  lastInternalCopy = {
+    normalized_text: normalizedText,
+    source_type: source.source_type,
+    source_id: source.source_id,
+    paper_id: source.paper_id,
+    copied_at_ms: nowTs()
+  };
+
+  DATA.copy_events.push({
+    participant_id: DATA.participant_id,
+    paper_id: source.paper_id,
+    event_type: 'copy',
+    source_type: source.source_type,
+    source_id: source.source_id,
+    character_count: copiedText.length,
+    ts: timestamp
+  });
+});
+
+document.addEventListener('paste', event => {
+  if (!inTaskPhase) return;
+
+  const target = classifyPasteTarget(event.target);
+
+  // Ignore pastes outside the participant-answer and AI-input fields.
+  if (!target) return;
+
+  const pastedText = (
+    event.clipboardData ||
+    window.clipboardData
+  )?.getData('text') || '';
+
+  const normalizedPastedText = normalizeClipboardText(pastedText);
+  if (!normalizedPastedText) return;
+
+  let sourceType = 'external_or_unknown';
+  let sourceId = null;
+  let sourcePaperId = null;
+  let matchedInternalCopy = false;
+  let millisecondsSinceCopy = null;
+
+  if (lastInternalCopy) {
+    millisecondsSinceCopy =
+      nowTs() - lastInternalCopy.copied_at_ms;
+
+    const withinTimeWindow =
+      millisecondsSinceCopy >= 0 &&
+      millisecondsSinceCopy <= INTERNAL_COPY_MATCH_WINDOW_MS;
+
+    const exactMatch =
+      normalizedPastedText === lastInternalCopy.normalized_text;
+
+    if (withinTimeWindow && exactMatch) {
+      sourceType = lastInternalCopy.source_type;
+      sourceId = lastInternalCopy.source_id;
+      sourcePaperId = lastInternalCopy.paper_id;
+      matchedInternalCopy = true;
+    }
+  }
+
+  DATA.paste_events.push({
+    participant_id: DATA.participant_id,
+    paper_id: target.paper_id,
+    event_type: 'paste',
+    source_type: sourceType,
+    source_id: sourceId,
+    source_paper_id: sourcePaperId,
+    target_type: target.target_type,
+    target_id: target.target_id,
+    character_count: pastedText.length,
+    matched_internal_copy: matchedInternalCopy,
+    milliseconds_since_copy: matchedInternalCopy
+      ? millisecondsSinceCopy
+      : null,
+    inferred_pathway: inferTransferPathway(
+      sourceType,
+      target.target_type
+    ),
+    ts: nowIso()
+  });
+});
 
 // ---------- Reflections page ----------
 function buildPaperScaleRows(containerId, fieldPrefix) {
