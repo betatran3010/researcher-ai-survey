@@ -1034,8 +1034,171 @@ function flagGroupError(container) {
   if (container) container.classList.add('group-error');
 }
 function validateCurrentPage() {
-  // TEMP: required-field enforcement disabled for fast click-through testing.
-  // Re-enable by removing this early return once testing is done.
+  const pageEl = document.querySelector('.page.active');
+  if (!pageEl) return true;
+
+  // Pages containing instructions, transitions, or debrief text have
+  // nothing for the participant to answer.
+  const pageId = pageEl.id;
+  const noResponseRequired =
+    pageId === 'page-instructions' ||
+    pageId === 'page-quiz-intro' ||
+    pageId === 'page-debrief' ||
+    pageId === 'page-submitted' ||
+    pageId === 'page-exit' ||
+    /^page-quiz-transition-/.test(pageId);
+
+  if (noResponseRequired) return true;
+
+  clearValidationErrors(pageEl);
+
+  let valid = true;
+  let firstInvalid = null;
+
+  function markInvalid(element, groupElement) {
+    valid = false;
+
+    if (groupElement) {
+      flagGroupError(groupElement);
+      if (!firstInvalid) firstInvalid = groupElement;
+    } else if (element) {
+      element.classList.add('input-error');
+      if (!firstInvalid) firstInvalid = element;
+    }
+  }
+
+  // ------------------------------------------------------------
+  // 1. Visible text, number, and select fields
+  // ------------------------------------------------------------
+  pageEl
+    .querySelectorAll('input[type="text"], input[type="number"], select')
+    .forEach(field => {
+      if (!isFieldVisible(field) || field.disabled) return;
+
+      const value = String(field.value || '').trim();
+
+      if (!value || !field.checkValidity()) {
+        markInvalid(field);
+      }
+    });
+
+  // ------------------------------------------------------------
+  // 2. Open-ended study responses
+  //
+  // Only textareas marked data-logfield are participant answers.
+  // AI message boxes are deliberately excluded.
+  // ------------------------------------------------------------
+  pageEl
+    .querySelectorAll('textarea[data-logfield]')
+    .forEach(field => {
+      if (!isFieldVisible(field) || field.disabled) return;
+
+      if (!field.value.trim()) {
+        markInvalid(field);
+      }
+    });
+
+  // ------------------------------------------------------------
+  // 3. Radio and checkbox question groups
+  //
+  // Each visible .options-grid is one question. At least one option
+  // must be selected. This covers About You, AI experience,
+  // AI-engagement reflections, and quiz choices.
+  // ------------------------------------------------------------
+  pageEl
+    .querySelectorAll('.options-grid')
+    .forEach(group => {
+      if (!isFieldVisible(group)) return;
+
+      const inputs = Array.from(
+        group.querySelectorAll('input[type="radio"], input[type="checkbox"]')
+      ).filter(input => !input.disabled);
+
+      // Ignore containers that do not contain an answer group.
+      if (inputs.length === 0) return;
+
+      const hasSelection = inputs.some(input => input.checked);
+
+      if (!hasSelection) {
+        markInvalid(null, group);
+      }
+    });
+
+  // ------------------------------------------------------------
+  // 4. "Other — please specify" fields
+  // ------------------------------------------------------------
+  pageEl
+    .querySelectorAll('input[id$="-specify"]')
+    .forEach(field => {
+      if (!isFieldVisible(field) || field.disabled) return;
+
+      if (!field.value.trim()) {
+        markInvalid(field);
+      }
+    });
+
+  // ------------------------------------------------------------
+  // 5. SRL and critical-thinking Likert questions
+  // ------------------------------------------------------------
+  pageEl
+    .querySelectorAll('.likert-item')
+    .forEach(item => {
+      if (!isFieldVisible(item)) return;
+
+      if (!item.querySelector('.likert-btn.selected')) {
+        markInvalid(null, item);
+      }
+    });
+
+  // ------------------------------------------------------------
+  // 6. Convincingness, confidence, understanding, and
+  //    whose-thinking scales
+  // ------------------------------------------------------------
+  pageEl
+    .querySelectorAll('.conf-scale')
+    .forEach(scale => {
+      if (!isFieldVisible(scale)) return;
+
+      if (!scale.querySelector('.conf-btn.selected')) {
+        markInvalid(null, scale);
+      }
+    });
+
+  // ------------------------------------------------------------
+  // 7. AI-experience sliders
+  //
+  // The sliders visually begin at 50, but a participant must move
+  // each one so the survey records an intentional answer.
+  // DATA.responses receives the value in each slider's oninput.
+  // ------------------------------------------------------------
+  pageEl
+    .querySelectorAll('input[type="range"][data-key]')
+    .forEach(slider => {
+      if (!isFieldVisible(slider) || slider.disabled) return;
+
+      const responseKey = slider.getAttribute('data-key');
+      const wasAnswered =
+        responseKey &&
+        Object.prototype.hasOwnProperty.call(DATA.responses, responseKey);
+
+      if (!wasAnswered) {
+        const block = slider.closest('.slider-block') || slider;
+        markInvalid(null, block);
+      }
+    });
+
+  if (!valid) {
+    if (firstInvalid) {
+      firstInvalid.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    }
+
+    alert('Please answer all questions on this page before continuing.');
+    return false;
+  }
+
   return true;
 }
 
