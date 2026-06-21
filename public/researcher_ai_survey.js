@@ -1010,12 +1010,19 @@ function renderAllSections() {
 
     ctIntroEl.innerHTML = introParagraphs
       .map((text, index) => `
-      <p class="muted" style="margin-bottom:${index === introParagraphs.length - 1 ? '16px' : '10px'};">
-        ${escapeHtml(text)}
-      </p>
-    `)
+        <p class="muted" style="margin-bottom:${index === introParagraphs.length - 1 ? '16px' : '10px'};">
+          ${escapeHtml(text)}
+        </p>
+      `)
       .join('');
   }
+
+  renderScale7Block(
+    'ctWrap',
+    CT_ITEMS_LIST.map(item => [item.key, item.label]),
+    'Not at all true for me',
+    'Very true for me'
+  );
 
   // AI Experience
   renderRadioGroup('rg-ai-purpose', 'ai_purpose', AI_PURPOSE_OPTIONS, o => o.l, 'checkbox');
