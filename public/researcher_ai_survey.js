@@ -69,7 +69,22 @@ const DATA = {
   quiz_score: 0,
   quiz_total: 0,
   fullscreen_used: false,
-  logs: {}
+  logs: {},
+
+  // ===================== TEST MODE (DEV/QA ONLY) =====================
+  // Always present on every record (real participants get test_mode:false)
+  // so production/test records are distinguishable purely by inspecting the
+  // exported data, never by which fields exist. See activateTestModeIfValid()
+  // and assignConditionAndOrder() below for how these get set.
+  test_mode: false,
+  test_condition_override: null, // e.g. "AI_pre", only set when test_mode is true
+  test_paper_override: null,     // e.g. ["font","food"], only set when explicitly overridden via ?papers=
+
+  // ===================== Submission-status tracking (spec section 7) =====================
+  submission_status: 'not_attempted', // 'not_attempted' | 'submitting' | 'confirmed' | 'failed'
+  submission_attempted_at: null,
+  submission_confirmed_at: null,
+  submission_error: null
 };
 
 // ---------- Option constants ----------
@@ -369,6 +384,130 @@ const PAPERS = {
 const PAGE_IDS = [];
 const PAPER_IDS = ['font', 'food', 'listing'];
 
+// ===================== TEST MODE (DEV/QA ONLY — NOT PART OF NORMAL PARTICIPANT FLOW) =====================
+// Lets a developer/tester force a specific assignment cell + paper order via
+// URL params (?test=1&cell=AI_pre[&papers=font,food]), to deliberately
+// exercise each experimental condition and inspect exactly what data gets
+// captured, without ever touching real participant assignment counters.
+//
+// SECURITY: a URL param can NEVER activate test mode by itself. `test=1` is
+// only a REQUEST to enter test mode; activateTestModeIfValid() below always
+// confirms with the server (GET /api/test-mode-status, which only ever
+// returns a boolean — no other env var or secret is exposed) before setting
+// TEST_MODE_ACTIVE. If the server reports test mode disabled, the URL
+// params are ignored entirely and the session proceeds as a normal
+// participant with DATA.test_mode left at its default (false).
+const TEST_VALID_CELLS = ['AI_pre', 'AI_post', 'noAI_pre', 'noAI_post'];
+const TEST_VALID_PAPER_IDS = PAPER_IDS; // ['font','food','listing'] — kept as a single source of truth
+
+let TEST_MODE_ACTIVE = false;          // only ever set true after server confirms ENABLE_TEST_MODE
+let TEST_MODE_CELL = null;             // validated cell override, e.g. "AI_pre"
+let TEST_MODE_PAPERS = null;           // validated 2-element papers override, or null (use default order)
+
+// Parses and whitelist-validates the ?test=1&cell=...&papers=... params.
+// Returns { requested: boolean, valid: boolean, cell, papers, error }.
+// Never trusts free-form input past this point — cell must be an exact
+// member of TEST_VALID_CELLS, and papers (if present) must be exactly two
+// DISTINCT members of TEST_VALID_PAPER_IDS.
+function parseTestModeParams() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('test') !== '1') {
+    return { requested: false, valid: false, cell: null, papers: null, error: null };
+  }
+  const cell = params.get('cell');
+  if (!cell || !TEST_VALID_CELLS.includes(cell)) {
+    return {
+      requested: true, valid: false, cell: null, papers: null,
+      error: 'Invalid or missing ?cell= value. Must be exactly one of: ' + TEST_VALID_CELLS.join(', ')
+    };
+  }
+  const papersRaw = params.get('papers');
+  let papers = null;
+  if (papersRaw != null && papersRaw !== '') {
+    papers = papersRaw.split(',').map(s => s.trim()).filter(Boolean);
+    const validPapers =
+      papers.length === 2 &&
+      papers[0] !== papers[1] &&
+      papers.every(p => TEST_VALID_PAPER_IDS.includes(p));
+    if (!validPapers) {
+      return {
+        requested: true, valid: false, cell: null, papers: null,
+        error: 'Invalid ?papers= override. Must be exactly two distinct values from: ' + TEST_VALID_PAPER_IDS.join(', ')
+      };
+    }
+  }
+  return { requested: true, valid: true, cell, papers, error: null };
+}
+
+// Blocking, developer-facing error screen for invalid test params — this is
+// NEVER shown to a real participant in a non-test URL, only when ?test=1 was
+// explicitly supplied with bad cell/papers values. Intentionally styled
+// distinctly from the survey UI (so it cannot be mistaken for a participant-
+// facing screen) and built without touching any existing page markup/CSS.
+function showTestModeDevError(message) {
+  document.body.innerHTML = '';
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;inset:0;background:#1a0d0d;color:#ffdede;font-family:monospace;' +
+    'padding:40px;z-index:99999;overflow:auto;';
+  el.innerHTML = '<h1 style="color:#ff6b6b;">TEST MODE — Invalid configuration</h1>' +
+    '<p style="font-size:16px;max-width:680px;">' + escapeHtml(message) + '</p>' +
+    '<p style="opacity:.7;">Valid cells: ' + TEST_VALID_CELLS.join(', ') + '<br>' +
+    'Valid papers: ' + TEST_VALID_PAPER_IDS.join(', ') + ' (exactly two, distinct)</p>';
+  document.body.appendChild(el);
+}
+
+// Renders/updates the fixed test-mode banner. Only ever called after
+// TEST_MODE_ACTIVE has been confirmed true; never appears during normal
+// participation. Built dynamically (not static HTML) so the existing page
+// markup/CSS is untouched — see also the "do not change styling" constraint.
+function renderTestModeBanner() {
+  let el = document.getElementById('testModeBanner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'testModeBanner';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99998;' +
+      'background:#7a1fa2;color:#fff;font-family:monospace;font-size:12px;' +
+      'padding:5px 10px;text-align:center;pointer-events:none;';
+    document.body.appendChild(el);
+  }
+  const papersLabel = TEST_MODE_PAPERS ? (TEST_MODE_PAPERS[0] + ' → ' + TEST_MODE_PAPERS[1]) : '(default order)';
+  el.textContent = 'TEST MODE — ' + (TEST_MODE_CELL || '?') + ' — ' + papersLabel;
+}
+
+// Entry point, called once on load (see DOMContentLoaded below). Resolves
+// the dual gate (URL param + server ENABLE_TEST_MODE) before anything else
+// in the page touches DATA.test_mode or TEST_MODE_ACTIVE.
+async function activateTestModeIfValid() {
+  const parsed = parseTestModeParams();
+  if (!parsed.requested) return; // no ?test=1 at all — completely normal session
+  if (!parsed.valid) {
+    showTestModeDevError(parsed.error);
+    throw new Error('test_mode_invalid_params');
+  }
+  let statusOk = false;
+  try {
+    const resp = await fetch('/api/test-mode-status');
+    const body = resp.ok ? await resp.json() : { enabled: false };
+    statusOk = body && body.enabled === true;
+  } catch (e) {
+    statusOk = false; // network failure -> fail closed, never assume enabled
+  }
+  if (!statusOk) {
+    // Server-side gate is OFF: per spec, the URL param alone must never
+    // activate test mode. Silently proceed as a completely normal session —
+    // DATA.test_mode stays false, no banner, no behavior change.
+    console.warn('[test-mode] ?test=1 was supplied but ENABLE_TEST_MODE is not set on the server; ignoring and proceeding as a normal session.');
+    return;
+  }
+  TEST_MODE_ACTIVE = true;
+  TEST_MODE_CELL = parsed.cell;
+  TEST_MODE_PAPERS = parsed.papers; // may be null -> default order
+  DATA.test_mode = true;
+  DATA.test_condition_override = parsed.cell;
+  DATA.test_paper_override = parsed.papers ? [...parsed.papers] : null;
+  renderTestModeBanner();
+}
+
 function getPlainStudyText(paperId) {
   return (window.PAPER_PLAIN_TEXT && window.PAPER_PLAIN_TEXT[paperId]) || '';
 }
@@ -493,6 +632,15 @@ function writeAssignmentCache(stableId, record) {
 // assignment, so failures are thrown for the caller (requestAssignmentWithUI,
 // below) to surface as a recoverable error with a Retry button.
 async function assignConditionAndOrder(researchRole) {
+  // ===================== TEST MODE (DEV/QA ONLY) =====================
+  // When test mode is active, route entirely to the separate, server-gated
+  // /api/test-assign-condition endpoint instead of the production
+  // /api/assign-condition flow below — this branch never touches the stable
+  // id, the same-browser assignment cache, or any real Firestore counters.
+  if (TEST_MODE_ACTIVE) {
+    return assignConditionAndOrderTestMode(researchRole);
+  }
+
   const { id: stableId, source: idSource } = getStableAssignmentId();
 
   // Best-effort, same-browser guard against re-rolling the assignment by
@@ -580,6 +728,69 @@ async function assignConditionAndOrder(researchRole) {
     study_order: DATA.study_order,
     unassigned_paper_id: DATA.unassigned_paper_id
   });
+}
+
+// ===================== TEST MODE (DEV/QA ONLY) =====================
+// Mirrors the DATA-field-setting half of assignConditionAndOrder() above,
+// but sources the assignment from /api/test-assign-condition (forced
+// cell/papers, server-validated, never touches Firestore) instead of
+// /api/assign-condition. Deliberately skips getStableAssignmentId(),
+// readAssignmentCache()/writeAssignmentCache(), and role-lock handling —
+// none of those production-only mechanisms should apply to a test run.
+async function assignConditionAndOrderTestMode(researchRole) {
+  const resp = await fetch('/api/test-assign-condition', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      cell: TEST_MODE_CELL,
+      papers: TEST_MODE_PAPERS,
+      research_role: researchRole
+    })
+  });
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error(errBody.error || ('test-assign-condition request failed: ' + resp.status));
+  }
+  const data = await resp.json();
+
+  DATA.stable_assignment_id_hash = data.stable_assignment_id_hash;
+  DATA.assignment_id_source = 'test_mode';
+  DATA.role_locked_to_original = false;
+  DATA.research_role = data.research_role;
+  DATA.research_expertise_stratum = data.research_expertise_stratum;
+  DATA.expertise_tier = data.research_expertise_stratum;
+  DATA.ai_condition = data.ai_condition;
+  DATA.condition = data.ai_condition;
+  DATA.critical_thinking_placement = data.critical_thinking_placement;
+  DATA.ct_scale_placement = data.critical_thinking_placement;
+  DATA.assignment_cell = data.assignment_cell;
+  DATA.assignment_assigned_at = data.assigned_at;
+  DATA.assignment_source = data.assignment_source;
+  DATA.assignment_version = data.assignment_version;
+  DATA.paper_order_version = data.paper_order_version;
+
+  document.body.classList.add(DATA.ai_condition === 'AI' ? 'condition-ai' : 'condition-noai');
+
+  const order = data.paper_order;
+  const unassigned = data.unassigned_paper_id;
+
+  DATA.study_order = order;
+  DATA.study_1_id = order[0]; DATA.study_2_id = order[1];
+  DATA.study_1_title = PAPERS[order[0]].title;
+  DATA.study_2_title = PAPERS[order[1]].title;
+
+  DATA.paper_order = [...order];
+  DATA.assigned_paper_1_id = order[0]; DATA.assigned_paper_1_title = PAPERS[order[0]].title;
+  DATA.assigned_paper_2_id = order[1]; DATA.assigned_paper_2_title = PAPERS[order[1]].title;
+  DATA.unassigned_paper_id = unassigned;
+
+  // Keep the banner's paper labels in sync even when no ?papers= override
+  // was supplied (i.e. the default combo came back from the server).
+  TEST_MODE_PAPERS = [...order];
+  renderTestModeBanner();
+
+  // Deliberately no writeAssignmentCache() call: test runs must never read
+  // from or write to the same-browser real-assignment cache.
 }
 
 // ---------- Assignment loading/error UI ----------
@@ -2381,6 +2592,124 @@ function flattenForExport() {
   return flat;
 }
 
+// ===================== TEST MODE (DEV/QA ONLY) — Data Audit Summary =====================
+// Computed entirely by reading the existing DATA object and existing logs
+// already populated elsewhere in this file (ai_message_log, ai_paper_aggregates,
+// behavioral_events, revision_log, copy_events, paste_events, responses, etc.)
+// — deliberately NOT a second/independent data model, per spec section 4.
+function computeAuditSummary() {
+  collectFieldsNow(); // make sure DATA.responses reflects whatever is on screen right now
+
+  const answeredFields = Object.entries(DATA.responses)
+    .filter(([, v]) => v !== '' && v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0));
+  const requiredEls = Array.from(document.querySelectorAll('[required]'));
+  const unansweredRequired = requiredEls.filter(el => {
+    if (el.type === 'checkbox' || el.type === 'radio') {
+      return !document.querySelector(`[name="${el.name}"]:checked`);
+    }
+    return !el.value;
+  });
+
+  const aiMessagesPerPaper = {};
+  const timeToFirstAiUsePerPaper = {};
+  PAPER_IDS.forEach(pid => {
+    const agg = (DATA.ai_paper_aggregates && DATA.ai_paper_aggregates[pid]) || {};
+    aiMessagesPerPaper[pid] = agg.total_messages || 0;
+    timeToFirstAiUsePerPaper[pid] = (agg.time_to_first_message_ms != null) ? agg.time_to_first_message_ms : null;
+  });
+
+  const totalPrompts = (DATA.ai_message_log || []).length;
+  const totalResponses = (DATA.ai_message_log || []).filter(m => m.success === true).length;
+
+  const tabSwitchEvents = (DATA.behavioral_events || []).filter(e => e.type === 'visibility' || e.type === 'blur').length;
+  const fullscreenExitEvents = (DATA.behavioral_events || []).filter(e => e.type === 'fullscreen_exit').length;
+
+  const quizAnswers = {};
+  Object.keys(DATA.responses).forEach(k => { if (k.indexOf('quiz_') === 0) quizAnswers[k] = DATA.responses[k]; });
+
+  const importantFields = [
+    'participant_id', 'prolific_id', 'research_role', 'research_expertise_stratum',
+    'assignment_cell', 'ai_condition', 'critical_thinking_placement',
+    'assigned_paper_1_id', 'assigned_paper_2_id', 'paper_order',
+    'consent_status', 'quiz_score', 'final_submission_timestamp', 'submission_status'
+  ];
+  const missingFields = importantFields.filter(f => {
+    const v = DATA[f];
+    return v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
+  });
+
+  return {
+    test_mode: DATA.test_mode,
+    test_condition_override: DATA.test_condition_override,
+    test_paper_override: DATA.test_paper_override,
+    participant_or_test_id: DATA.participant_id,
+    research_expertise_stratum: DATA.research_expertise_stratum,
+    assignment_cell: DATA.assignment_cell,
+    ai_condition: DATA.ai_condition,
+    critical_thinking_placement: DATA.critical_thinking_placement,
+    assigned_paper_ids_and_order: DATA.paper_order,
+    current_page: (typeof pageOrder !== 'undefined' && typeof currentIdx !== 'undefined') ? pageOrder[currentIdx] : null,
+    answered_field_count: answeredFields.length,
+    unanswered_required_field_count: unansweredRequired.length,
+    ai_message_count_per_paper: aiMessagesPerPaper,
+    total_participant_prompts: totalPrompts,
+    total_assistant_responses: totalResponses,
+    time_to_first_ai_use_ms_per_paper: timeToFirstAiUsePerPaper,
+    answer_revision_count: (DATA.revision_log || []).length,
+    copy_event_count: (DATA.copy_events || []).length,
+    paste_event_count: (DATA.paste_events || []).length,
+    tab_switch_or_visibility_event_count: tabSwitchEvents,
+    fullscreen_exit_count: fullscreenExitEvents,
+    quiz_answers: quizAnswers,
+    quiz_score: DATA.quiz_score,
+    quiz_total: DATA.quiz_total,
+    final_submission_attempted: DATA.submission_status !== 'not_attempted',
+    final_submission_confirmed_by_server: DATA.submission_status === 'confirmed',
+    submission_status: DATA.submission_status,
+    submission_attempted_at: DATA.submission_attempted_at,
+    submission_confirmed_at: DATA.submission_confirmed_at,
+    submission_error: DATA.submission_error,
+    missing_or_empty_important_fields: missingFields
+  };
+}
+
+// Strips anything that isn't alphanumeric/dash/underscore so user-influenced
+// values (assignment cell, paper ids) can never inject path separators or
+// other special characters into a downloaded filename.
+function sanitizeFilenameComponent(s) {
+  return String(s == null ? '' : s).replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+}
+
+function testExportFilenameBase() {
+  const cell = sanitizeFilenameComponent(DATA.test_condition_override || DATA.assignment_cell || 'na');
+  const papers = (DATA.paper_order || []).map(sanitizeFilenameComponent).join('-') || 'na';
+  const date = sanitizeFilenameComponent(new Date().toISOString().slice(0, 10));
+  return `${cell}-${papers}-${date}`;
+}
+
+function exportRawDataJson() {
+  const base = testExportFilenameBase();
+  downloadBlob(JSON.stringify(DATA, null, 2), `survey-test-${base}.json`, 'application/json');
+}
+
+function exportAuditSummaryJson() {
+  const base = testExportFilenameBase();
+  downloadBlob(JSON.stringify(computeAuditSummary(), null, 2), `survey-audit-${base}.json`, 'application/json');
+}
+
+function exportComparisonCsv() {
+  const base = testExportFilenameBase();
+  const summary = computeAuditSummary();
+  const flat = {};
+  Object.entries(summary).forEach(([k, v]) => {
+    flat[k] = (v !== null && typeof v === 'object') ? JSON.stringify(v) : v;
+  });
+  const keys = Object.keys(flat);
+  const escapeCsv = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const csv = keys.join(',') + '\n' + keys.map(k => escapeCsv(flat[k])).join(',');
+  downloadBlob(csv, `survey-audit-comparison-${base}.csv`, 'text/csv');
+}
+
 function downloadBlob(content, filename, mime) {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -2406,6 +2735,8 @@ function openAdminOverlay() {
   const overlay = document.getElementById('adminOverlay');
   const pre = document.getElementById('adminPreview');
   if (pre) pre.textContent = JSON.stringify(DATA, null, 2);
+  const auditPre = document.getElementById('adminAuditSummary');
+  if (auditPre) auditPre.textContent = JSON.stringify(computeAuditSummary(), null, 2);
   if (overlay) overlay.classList.add('open');
 }
 
@@ -2416,31 +2747,103 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ---------- Submission ----------
+// Mirrors setAssignmentStatus() above, targeting the separate
+// #submissionStatus block (same reused CSS classes, different element ids)
+// so the assignment-loading UI on page-about-you and the submission-loading
+// UI on page-debrief never fight over the same DOM nodes.
+function setSubmissionStatus(mode, message) {
+  const wrap = document.getElementById('submissionStatus');
+  const spinner = document.getElementById('submissionSpinner');
+  const text = document.getElementById('submissionStatusText');
+  const retryBtn = document.getElementById('submissionRetryBtn');
+  if (!wrap) return;
+  if (mode === 'hidden') {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'flex';
+  wrap.classList.remove('loading', 'error');
+  wrap.classList.add(mode);
+  if (spinner) spinner.style.display = (mode === 'loading') ? 'inline-block' : 'none';
+  if (text) text.textContent = message || '';
+  if (retryBtn) retryBtn.style.display = (mode === 'error') ? 'inline-block' : 'none';
+}
+
+// Throws on any non-success response or network failure, rather than
+// swallowing the error — the caller (finalizeSubmission) is responsible for
+// deciding what the participant sees, including whether to retry.
 async function submitToServer() {
-  try {
-    const response = await fetch('/api/submit-survey', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(DATA)
-    });
-    if (!response.ok) throw new Error('submit-survey failed with status ' + response.status);
-  } catch (err) {
-    console.warn('submitToServer failed (endpoint may not be implemented yet):', err);
+  const response = await fetch('/api/submit-survey', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(DATA)
+  });
+  if (!response.ok) {
+    let detail = '';
+    try { detail = (await response.json()).error || ''; } catch (e) { /* ignore */ }
+    throw new Error('submit-survey failed with status ' + response.status + (detail ? (': ' + detail) : ''));
   }
 }
 
+// Guards against duplicate concurrent submit requests (double-click on
+// "Finish", or a click on Retry while the original request is still in
+// flight) — mirrors the existing navigateInFlight pattern used for
+// assignment requests.
+let submitInFlight = false;
+
 function finalizeSubmission() {
+  if (submitInFlight) return;
   if (document.fullscreenElement) {
     (document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen)?.call(document);
   }
   collectFieldsNow();
   finishQuiz();
+  // All survey data stays in DATA (in browser memory) regardless of what
+  // happens next — nothing here clears or rewrites it before a confirmed
+  // success, so a failed attempt can be retried with the exact same payload.
   DATA.session_end_iso = nowIso();
   DATA.completion_status = 'completed';
   DATA.final_submission_timestamp = nowIso();
-  submitToServer();
-  currentIdx = pageOrder.indexOf('page-submitted');
-  showPage('page-submitted');
+  attemptSubmission();
+}
+
+async function attemptSubmission() {
+  submitInFlight = true;
+  const btnNext = document.getElementById('btnNext');
+  setSubmissionStatus('loading', 'Submitting your responses…');
+  if (btnNext) btnNext.disabled = true;
+  // Submission-status fields (spec section 7) — derived straight from this
+  // existing flow, not a separate tracker: 'not_attempted' is the DATA
+  // default, this call moves it to 'submitting', and the try/catch below
+  // resolves it to 'confirmed' or 'failed'.
+  DATA.submission_status = 'submitting';
+  DATA.submission_attempted_at = nowIso();
+  try {
+    await submitToServer();
+    DATA.submission_status = 'confirmed';
+    DATA.submission_confirmed_at = nowIso();
+    DATA.submission_error = null;
+    setSubmissionStatus('hidden');
+    // Only now — after a confirmed server success — does the participant
+    // see the submitted screen. On any failure (network error or non-2xx
+    // response) we never reach this line, so the participant stays on the
+    // current page with their data intact and an inline retry affordance.
+    currentIdx = pageOrder.indexOf('page-submitted');
+    showPage('page-submitted');
+  } catch (err) {
+    console.error('[attemptSubmission] /api/submit-survey failed:', err);
+    DATA.submission_status = 'failed';
+    DATA.submission_error = (err && err.message) || 'unknown_error';
+    setSubmissionStatus('error', 'Could not submit your responses. Please check your connection and retry.');
+    if (btnNext) btnNext.disabled = false;
+  } finally {
+    submitInFlight = false;
+  }
+}
+
+function retrySubmission() {
+  if (submitInFlight) return;
+  attemptSubmission();
 }
 
 // ---------- Autosave ----------
@@ -2451,7 +2854,18 @@ function autosave() {
 setInterval(autosave, 10000);
 
 // ---------- Init ----------
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // ===================== TEST MODE (DEV/QA ONLY) =====================
+  // Must resolve before anything else touches the page: on invalid test
+  // params this replaces the entire page with a developer-facing error and
+  // throws, which the catch below uses to skip the rest of normal init.
+  try {
+    await activateTestModeIfValid();
+  } catch (e) {
+    if (e && e.message === 'test_mode_invalid_params') return;
+    throw e;
+  }
+
   initConsentPage();
   populateCountrySelect();
   // Populate the About You / SRL / CT / AI-experience radio groups and sliders

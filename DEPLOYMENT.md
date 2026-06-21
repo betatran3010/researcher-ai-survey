@@ -1,4 +1,4 @@
-# Deployment & Testing Guide
+# Deployment & Testing Guide (Google Cloud Run)
 
 ## Project structure
 
@@ -18,88 +18,296 @@ gopnik-ai/
   .gitignore
 ```
 
-This is a real Node.js + Express app, not a static site. It must be deployed somewhere that can run a persistent Node process with a server-side environment variable (Render, Railway, Vercel serverless, Fly.io, or equivalent) — **not** GitHub Pages, which can only serve static files and cannot hold a secret API key.
+This is a real Node.js + Express app. It is deployed to **Cloud Run**, which runs the container, serves both the static frontend and the `/api/*` routes through the same Express server, and scales it automatically. PDFs and other static files are still served directly by this Express app — the assets bucket created during setup is not used yet.
 
-## Recommended platform: Render
+## Your Google Cloud resources (already created)
 
-### 1. Push the project to GitHub
+| Resource | Value |
+|---|---|
+| Project ID | `researcher-ai-survey` |
+| Region | `us-west1` |
+| Experiment-assets bucket | `researcher-ai-survey-assets-tnl22` (unused for now) |
+| Participant-data bucket | `researcher-ai-survey-data-tnl22` |
+| Firestore | Native mode, database `(default)`, location `us-west1` |
 
-Before pushing, double check `.env` is **not** tracked (it's in `.gitignore`) and that no file in the repo contains the real API key. Only `.env.example` (with the placeholder `OPENAI_API_KEY=your_key_here`) should be committed.
+## How storage and assignment work now
 
-```
-git init
-git add .
-git commit -m "Researcher AI survey full-stack app"
-git remote add origin <your-repo-url>
-git push -u origin main
-```
+- **Submissions**: each completed participant's full data object is written to Cloud Storage as its own JSON file at `submissions/YYYY-MM-DD/<sha256-hash>.json` in `researcher-ai-survey-data-tnl22`. The filename is a SHA-256 hash of the participant's normalized Prolific ID — never the raw ID. The write uses a Cloud Storage creation precondition, so a second write to the same path is rejected by GCS (HTTP 412) instead of overwriting the original file.
+- **Assignment**: balanced AI/CT-placement and paper-order assignment is computed in a Firestore transaction, reading and incrementing per-stratum counters at `assignment_counters/{stratum}` and writing a permanent record at `assignments/{sha256-hash}`. Re-requesting an assignment for the same hash always returns the original — counters are not incremented twice.
+- **Auth**: both use Application Default Credentials (ADC) — no service-account key file is ever created or committed. Locally, ADC comes from your own `gcloud auth application-default login`. In Cloud Run, ADC comes from the runtime service account you attach to the service.
 
-### 2. Create the Web Service on Render
-
-1. Go to Render → New → Web Service.
-2. Connect the GitHub repo.
-3. Settings:
-   - **Build command:** `npm install`
-   - **Start command:** `npm start` (runs `node server.js`)
-   - **Environment:** Node
-4. Add environment variables under the service's "Environment" tab:
-   - `OPENAI_API_KEY` = your real OpenAI key (paste it directly into Render's env var field — never into any file in the repo)
-   - `ALLOWED_ORIGIN` = the exact deployed URL Render gives you, e.g. `https://researcher-ai-survey.onrender.com` (set this **after** the first deploy, once you know the URL, then redeploy)
-   - `PORT` is set automatically by Render; you don't need to set it.
-5. Click "Create Web Service." Render will install dependencies and start the server.
-
-AI/no-AI condition and CT-placement assignment requires no database or other external setup: it's computed deterministically on the server from a hash of the participant ID (see the "Stratified condition/CT-placement assignment" section of `server.js`), so there's nothing to provision here.
-
-### 3. Confirm `/api/chat` works
-
-Once deployed, open the deployed URL in a browser — the survey should load. To confirm the backend route itself responds (without needing to click through the whole survey), run from any machine:
+## 1. Install dependencies
 
 ```bash
-curl -X POST https://your-app.onrender.com/api/chat \
+cd gopnik-ai
+npm install
+```
+
+## 2. Authenticate locally via Application Default Credentials
+
+Windows (Command Prompt) and Cloud Shell both use the `gcloud` CLI. If you don't have it locally, either install the Google Cloud CLI for Windows, or just do local testing from **Cloud Shell** (https://console.cloud.google.com → the `>_` icon top-right), which has `gcloud` and Node preinstalled.
+
+```bash
+gcloud auth login
+gcloud config set project researcher-ai-survey
+gcloud auth application-default login
+```
+
+The last command opens a browser, you sign in, and it writes credentials to a local file that `@google-cloud/storage` and `@google-cloud/firestore` pick up automatically — no key file, no env var needed.
+
+## 3. Test locally against the real GCS bucket and Firestore database
+
+Create a local `.env` (never committed — already in `.gitignore`):
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```
+OPENAI_API_KEY=sk-...your real key...
+ALLOWED_ORIGIN=
+PORT=3000
+GCS_SUBMISSIONS_BUCKET=researcher-ai-survey-data-tnl22
+USE_LOCAL_SUBMISSION_FILE=false
+```
+
+Run it:
+
+```bash
+npm start
+```
+
+Visit `http://localhost:3000`. With `USE_LOCAL_SUBMISSION_FILE=false` and ADC set up from step 2, this is already writing to the real `researcher-ai-survey-data-tnl22` bucket and the real Firestore database — there is no separate "local-only" database. If you'd rather not touch real cloud resources while doing quick UI iteration, set `USE_LOCAL_SUBMISSION_FILE=true` temporarily; assignment still uses real Firestore either way (there is no local substitute for it).
+
+### Test Firestore balancing
+
+Open a few fresh sessions (or use `curl`) and POST to `/api/assign-condition` with different `stable_participant_id` values but the same `research_role`:
+
+```bash
+curl -X POST http://localhost:3000/api/assign-condition \
+  -H "Content-Type: application/json" \
+  -d '{"stable_participant_id":"test-participant-1","research_role":"PhD student"}'
+```
+
+Repeat with `test-participant-2`, `test-participant-3`, etc. (same role, so same stratum). After several calls, open the Firestore console (https://console.cloud.google.com/firestore/databases/-default-/data → project `researcher-ai-survey`) and check `assignment_counters/lower` (or `higher`, depending on the role) — `cell_counts` and `paper_combo_counts` should be staying close to even across calls. Re-POST with the *same* `stable_participant_id` you already used and confirm the response is byte-for-byte identical to the first response for that id (idempotent re-assignment).
+
+### Test one full submission end-to-end
+
+Complete one full run of the survey at `http://localhost:3000` through to the final "submitted" screen. Then:
+
+1. Open the Cloud Storage console (https://console.cloud.google.com/storage/browser/researcher-ai-survey-data-tnl22) and look under `submissions/<today's date>/` — you should see one `<hash>.json` file.
+2. Open it and confirm it's the full submitted data object.
+3. In Firestore, open `assignments/<that same hash>` and confirm `completion_status` is now `"completed"` with a `completed_at` timestamp.
+
+## 4. Create a dedicated Cloud Run runtime service account
+
+Don't use the default compute service account — create one scoped to this app:
+
+```bash
+gcloud iam service-accounts create researcher-survey-runner \
+  --project=researcher-ai-survey \
+  --display-name="Researcher AI Survey Cloud Run runtime"
+```
+
+This gives you `researcher-survey-runner@researcher-ai-survey.iam.gserviceaccount.com`.
+
+### Grant it write access to the participant-data bucket
+
+```bash
+gcloud storage buckets add-iam-policy-binding gs://researcher-ai-survey-data-tnl22 \
+  --member="serviceAccount:researcher-survey-runner@researcher-ai-survey.iam.gserviceaccount.com" \
+  --role="roles/storage.objectCreator"
+```
+
+`roles/storage.objectCreator` grants write/create access only — it deliberately cannot read, overwrite, or delete existing objects in the bucket, which fits "save participant data, never touch it again from the app." If you also want the app itself to ever read submissions back (it doesn't today), you'd add `roles/storage.objectViewer` too.
+
+### Grant it minimal Firestore permissions
+
+```bash
+gcloud projects add-iam-policy-binding researcher-ai-survey \
+  --member="serviceAccount:researcher-survey-runner@researcher-ai-survey.iam.gserviceaccount.com" \
+  --role="roles/datastore.user"
+```
+
+`roles/datastore.user` allows reading and writing documents (needed for the assignment transactions and completion updates) but not managing the database itself (no creating/deleting indexes or databases). This is the standard minimal role for an application reading/writing its own Firestore data.
+
+## 5. Store the OpenAI key in Secret Manager
+
+```bash
+gcloud services enable secretmanager.googleapis.com --project=researcher-ai-survey
+
+printf "sk-...your real key..." | gcloud secrets create openai-api-key \
+  --project=researcher-ai-survey \
+  --data-file=-
+
+gcloud secrets add-iam-policy-binding openai-api-key \
+  --project=researcher-ai-survey \
+  --member="serviceAccount:researcher-survey-runner@researcher-ai-survey.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+If you ever need to rotate the key later:
+
+```bash
+printf "sk-...new key..." | gcloud secrets versions add openai-api-key --data-file=-
+```
+
+## 6. Deploy from source to Cloud Run
+
+From the `gopnik-ai` directory (containing `server.js`/`package.json`):
+
+```bash
+gcloud run deploy researcher-ai-survey \
+  --source . \
+  --project=researcher-ai-survey \
+  --region=us-west1 \
+  --service-account=researcher-survey-runner@researcher-ai-survey.iam.gserviceaccount.com \
+  --set-env-vars="GCS_SUBMISSIONS_BUCKET=researcher-ai-survey-data-tnl22,USE_LOCAL_SUBMISSION_FILE=false" \
+  --set-secrets="OPENAI_API_KEY=openai-api-key:latest" \
+  --allow-unauthenticated
+```
+
+`--source .` builds the container for you (Cloud Build, via the Node buildpack) — no Dockerfile needed. `--allow-unauthenticated` is required so participants (who aren't Google-authenticated) can load the survey. The deploy prints a service URL like `https://researcher-ai-survey-xxxxx-uw.a.run.app`.
+
+### Set ALLOWED_ORIGIN once you know the URL
+
+```bash
+gcloud run services update researcher-ai-survey \
+  --project=researcher-ai-survey \
+  --region=us-west1 \
+  --set-env-vars="ALLOWED_ORIGIN=https://researcher-ai-survey-xxxxx-uw.a.run.app"
+```
+
+(Combine this into the same `--set-env-vars` list in step 6 once you know the URL in advance, to avoid a second deploy — Cloud Run gives you a predictable URL pattern after the first deploy.)
+
+## 7. Verify the deployed service
+
+```bash
+curl -X POST https://researcher-ai-survey-xxxxx-uw.a.run.app/api/chat \
   -H "Content-Type: application/json" \
   -d '{"participant_id":"test","condition":"AI","paper_id":"font","study_title":"Test","study_text":"Test study text.","user_message":"Hello","conversation_history":[]}'
 ```
 
-A healthy response looks like `{"reply":"..."}`. If `OPENAI_API_KEY` isn't set yet, you'll get `{"error":"The AI assistant is temporarily unavailable. Please try again later."}` with status 500 — the real cause is only in Render's server logs, never shown to the participant.
+A healthy response is `{"reply":"..."}`. Then open the deployed URL in a browser and run through the full survey once, the same way as the local end-to-end test in step 3 — confirm the GCS file and the Firestore `completion_status` update both appear, using the deployed bucket/database (same ones, so the same console links apply).
 
-### 4. Test from another computer
+## Downloading all participant JSON files later
 
-Open the deployed URL on a separate device/browser (e.g., your phone, or ask someone else to open it). The survey, PDFs, and AI assistant should all work without anyone needing local files or an API key — everything is served from Render.
-
-## Local development
-
-```
-npm install
-cp .env.example .env   # then edit .env and paste your real key locally — never commit it
-npm start
+```bash
+mkdir all_submissions
+gcloud storage cp -r gs://researcher-ai-survey-data-tnl22/submissions/* ./all_submissions/
 ```
 
-Visit `http://localhost:3000`.
+This downloads every date folder and every per-participant JSON file underneath it, preserving the `YYYY-MM-DD/<hash>.json` structure, to a local `all_submissions` folder.
 
-## Security checklist (already implemented in server.js)
+## Local development without any GCP project (optional)
 
-- API key read only from `process.env.OPENAI_API_KEY`; never appears in any file under `public/` or in `server.js` itself.
-- `.env` is git-ignored; only `.env.example` (placeholder) is committed.
-- CORS restricted to `ALLOWED_ORIGIN` once set (defaults to permissive only for local dev when unset).
-- No global/per-IP rate limit on `/api/chat` (participants may share a network); the only request limit is a per-paper, per-participant 5-message cap, derived server-side from each request's own conversation history.
-- Request body size capped at 256kb; `user_message` capped at 4000 chars; `study_text` capped at 60000 chars; conversation history capped at 40 turns.
-- Participant-facing errors are generic ("The AI assistant could not respond right now..."); full provider/error detail is only `console.error`'d server-side.
+If you ever want to iterate on the frontend/UI with zero cloud dependency for submissions, set `USE_LOCAL_SUBMISSION_FILE=true` in `.env` — this restores the old append-only `data/submissions.jsonl` file for completed submissions only. Assignment always requires real Firestore access (ADC), since there is no local-file substitute for the balancing logic.
 
-**If the previously-shared API key (pasted in plaintext in chat) hasn't been rotated yet, do that now in the OpenAI dashboard before deploying** — treat any key that was ever typed into a chat as compromised, regardless of where it ends up being used.
+## Test mode (dev/QA only — NOT for real recruitment)
+
+A developer/tester can force a specific assignment cell + paper order to deliberately exercise each experimental condition and inspect exactly what data gets captured, without touching real participant assignment counters or production submissions.
+
+**Dual gate — both required:**
+1. Server env var `ENABLE_TEST_MODE=true` (unset/false by default; see `.env.example`).
+2. URL includes `?test=1`.
+
+A URL param alone can never enable test mode — the frontend always confirms with the server (`GET /api/test-mode-status`) before activating. If `ENABLE_TEST_MODE` is not `true`, `?test=1` is silently ignored and the session proceeds as a completely normal participant.
+
+**URL formats:**
+
+```
+?test=1&cell=AI_pre
+?test=1&cell=AI_post
+?test=1&cell=noAI_pre
+?test=1&cell=noAI_post
+?test=1&cell=AI_pre&papers=font,food
+?test=1&cell=noAI_post&papers=listing,font
+```
+
+`cell` must be exactly one of `AI_pre`, `AI_post`, `noAI_pre`, `noAI_post`. `papers` (optional) must be exactly two distinct values from `font`, `food`, `listing`; if omitted, a fixed default pair is used. Any invalid value shows a blocking developer-facing error screen instead of silently falling back to an unintended condition.
+
+**How it stays separate from production:**
+- Test assignments go through `POST /api/test-assign-condition` (gated by `ENABLE_TEST_MODE`), which never reads/writes `assignment_counters/{stratum}` or `assignments/{hash}` in Firestore.
+- Test submissions (`DATA.test_mode === true`) are routed by `/api/submit-survey` to a separate destination: `data/test-submissions.jsonl` locally, or the `test-submissions/` prefix in GCS — never mixed with `data/submissions.jsonl` / `submissions/`.
+- Every record carries `test_mode` (`true` for test runs, `false` for real participants), plus `test_condition_override` and `test_paper_override` when set.
+- A visible purple banner ("TEST MODE — `<cell>` — `<paper1>` → `<paper2>`") appears fixed at the top of the page whenever test mode is active, and only then.
+
+**Data Audit Summary + exports:** open the existing hidden admin panel (Ctrl+Shift+E, or `?admin=1`) — it now also shows a live-computed audit summary (test status, assignment fields, page, answered/unanswered-required field counts, AI usage and timing per paper, prompt/response counts, revision/copy/paste/tab-switch/fullscreen-exit counts, quiz answers/score, submission status) and three export buttons: raw `DATA` JSON, audit-summary JSON, and a flat one-row comparison CSV. Filenames are sanitized and look like `survey-test-AI_pre-font-food-2026-06-21.json`.
+
+**Four pilot scenarios:**
+- **A — AI active-use test:** `?test=1&cell=AI_pre` (or `AI_post`), ask several AI questions, copy from a response, paste into an answer, revise it, then check the transcript/timing/copy-paste/revision fields in the audit summary.
+- **B — AI available but unused:** force an AI cell, never open/use the AI tab, confirm AI message counts stay 0 and everything else still works.
+- **C — No-AI normal completion:** `?test=1&cell=noAI_pre` (or `noAI_post`), confirm no AI tab/interface appears and no AI records are created.
+- **D — Behavioral stress test:** switch tabs, exit fullscreen, paste text, delete/rewrite answers, answer some quiz items wrong — confirm the corresponding behavioral, copy/paste, revision, and quiz fields are all logged.
+
+**Disabling before real recruitment:** set `ENABLE_TEST_MODE=false` (or remove the env var) on the deployed service. With it disabled, `?test=1` has zero effect on any session.
+
+## Admin bulk export (researcher-only, separate from the in-session admin panel)
+
+The Ctrl+Shift+E admin panel's export buttons only ever export the **current browser session's** in-memory data. To pull **all accumulated submissions across every participant** from backend storage (GCS or the local `.jsonl` file, depending on `USE_LOCAL_SUBMISSION_FILE`), use these two protected backend routes instead — they are not linked from anywhere in the participant-facing UI:
+
+```
+GET /api/admin/export-submissions.json?type=production
+GET /api/admin/export-submissions.json?type=test
+GET /api/admin/export-submissions.csv?type=production
+GET /api/admin/export-submissions.csv?type=test
+```
+
+- `type` defaults to `production` if omitted. `production` and `test` are always exported separately and never combined.
+- Both routes require the header `X-Admin-Key: <your ADMIN_EXPORT_KEY>`. Missing or wrong key → `401`. The key is never accepted as a query parameter and is never present in any frontend file.
+- Set `ADMIN_EXPORT_KEY` (generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`) as an env var locally (`.env`) and on Cloud Run:
+  ```bash
+  gcloud run services update researcher-ai-survey \
+    --project=researcher-ai-survey \
+    --region=us-west1 \
+    --set-env-vars="ADMIN_EXPORT_KEY=your-long-random-value"
+  ```
+  If it's unset, both routes always return 401 — there's no "open" default.
+- JSON export returns the full nested record for every accumulated submission, unmodified. CSV export returns one row per submission, with one column per field seen across all records (nested objects/arrays are JSON-stringified into their cell).
+
+**Windows PowerShell download commands** (replace `<your-deployed-url>` and `<your-admin-key>`):
+
+```powershell
+# Production submissions
+Invoke-WebRequest -Uri "https://<your-deployed-url>/api/admin/export-submissions.json?type=production" `
+  -Headers @{ "X-Admin-Key" = "<your-admin-key>" } `
+  -OutFile "submissions-production.json"
+
+Invoke-WebRequest -Uri "https://<your-deployed-url>/api/admin/export-submissions.csv?type=production" `
+  -Headers @{ "X-Admin-Key" = "<your-admin-key>" } `
+  -OutFile "submissions-production.csv"
+
+# Test submissions
+Invoke-WebRequest -Uri "https://<your-deployed-url>/api/admin/export-submissions.json?type=test" `
+  -Headers @{ "X-Admin-Key" = "<your-admin-key>" } `
+  -OutFile "submissions-test.json"
+
+Invoke-WebRequest -Uri "https://<your-deployed-url>/api/admin/export-submissions.csv?type=test" `
+  -Headers @{ "X-Admin-Key" = "<your-admin-key>" } `
+  -OutFile "submissions-test.csv"
+```
+
+For local testing against `http://localhost:3000`, just swap the URL.
+
+## Security checklist
+
+- No service-account JSON key file exists anywhere in this repo or was ever created for this app — both local dev and Cloud Run authenticate via Application Default Credentials only.
+- `.env` is git-ignored; only `.env.example` (placeholders, no real bucket secrets needed since bucket names aren't secret) is committed.
+- The OpenAI key lives only in Secret Manager and is injected as an env var by Cloud Run at runtime — never in `.env.example`, never in any committed file.
+- CORS restricted to `ALLOWED_ORIGIN` once set.
+- Cloud Storage write uses `objectCreator` (create-only) IAM, and a creation precondition at the API level, so the app cannot overwrite or read back a participant's existing file even if it tried.
+- Raw Prolific IDs are never sent to Firestore or used in a GCS object name — only their SHA-256 hash.
 
 ## Testing checklist
 
-- [ ] AI condition: full flow from consent through debrief, all 3 studies, AI tab present and functional.
-- [ ] No-AI condition: full flow, AI tab and AI-only instructions/reflections items are hidden (no `.ai-only` content visible).
-- [ ] All 3 papers (font, food, listing) render correctly in the PDF pane on a study page.
-- [ ] Multi-turn AI chat: ask 3+ follow-up questions in the same paper's AI tab; conversation history is sent and the assistant's replies stay coherent with prior turns.
-- [ ] AI responses are accurate to the study text provided (ask a question whose answer is only in the paper, confirm the assistant answers correctly and doesn't invent details).
-- [ ] Refreshing mid-survey: confirm autosave to `localStorage` and that behavior on reload is acceptable (currently restarts at consent — note if a resume-from-autosave feature is wanted later).
-- [ ] Per-paper message cap: send 5 AI chat messages on one paper and confirm the 6th is blocked with the cap message, while a different participant (or a second browser) is unaffected and a *different* paper's count starts fresh.
-- [ ] Condition assignment: confirm the About You "Continue" button briefly shows a loading state, then advances normally (no database/env var needed — assignment is computed deterministically from a hash of the participant ID). Submit the same `stable_participant_id` (e.g. a Prolific ID) to `/api/assign-condition` twice with the same `research_role` (e.g. via `curl`) and confirm both responses return the identical `assignment_cell`, `ai_condition`, `critical_thinking_placement`, `paper_order`, and `stable_assignment_id_hash`. Also try the same id with different capitalization/whitespace (e.g. `" ABC123 "` vs `"abc123"`) and confirm identical results, since the server normalizes (trim + lowercase) before hashing.
-- [ ] Missing API key: temporarily unset `OPENAI_API_KEY` on the server and confirm `/api/chat` returns the generic unavailable message (not a raw error) and the real cause is in server logs only.
-- [ ] Invalid/failed OpenAI response: simulate (e.g., temporarily use a bad model name) and confirm the frontend shows "Sorry, the AI assistant is unavailable right now" rather than crashing or exposing provider error text.
-- [ ] Mobile and desktop browser pass: layout, fullscreen prompt, and AI chat all usable on both.
-- [ ] Deployed PDF paths: confirm `papers/font.pdf`, `papers/food.pdf`, `papers/listing.pdf` load correctly from the deployed domain (not just localhost).
-- [ ] Send button disables while waiting for an AI reply and re-enables after; rapid double-clicking does not produce duplicate sent messages.
-- [ ] CT-placement stratification: open the survey several times in fresh sessions within the same expertise tier and condition, confirm `ct_scale_placement` alternates pre/post roughly evenly (check via the admin export, `Ctrl+Shift+E`).
+- [ ] Local run against real GCS/Firestore (steps 2–3) completes one full submission; file appears in the bucket, `assignments/{hash}` shows `completed`.
+- [ ] Repeated `/api/assign-condition` calls with the same `stable_participant_id` return an identical assignment.
+- [ ] Several different `stable_participant_id`s with the same role show roughly even `cell_counts` / `paper_combo_counts` in `assignment_counters`.
+- [ ] Two assignment requests fired at the same time (e.g. two terminals running `curl` simultaneously) for two *different* ids do not produce a corrupted/incorrect counter (no lost updates) — Firestore's transaction retry handles this automatically; you're just confirming the final counts add up.
+- [ ] Submitting twice for the same participant (e.g. retry after a simulated network failure) does not produce two GCS files — the second write gets an HTTP 412 from GCS, logged server-side, and the participant still sees success.
+- [ ] Disconnect network mid-submission (or block the deployed URL temporarily) and confirm: the participant stays on the debrief page, sees a clear retry message, the survey data is untouched, and clicking Retry (or restoring the network and clicking Retry) completes the submission and shows the submitted screen.
+- [ ] Rapid double-clicking "Finish" does not produce two concurrent submit requests.
+- [ ] AI condition / No-AI condition / multi-turn chat / 5-message cap / PDF rendering for all 3 papers — unchanged from before, verify nothing regressed.
+- [ ] `/api/chat` still returns the generic unavailable message (not raw error text) if `OPENAI_API_KEY` is briefly removed from Secret Manager access.

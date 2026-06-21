@@ -1996,6 +1996,15 @@
       <span id="assignmentStatusText"></span>
       <button type="button" class="assignment-retry-btn" id="assignmentRetryBtn" style="display:none;" onclick="retryAssignment()">Retry</button>
     </span>
+    <!-- Reuses the .assignment-status / .assignment-spinner / .assignment-retry-btn
+         classes verbatim (no new CSS) for the analogous final-submission
+         loading/retry state. Hidden by default; shown only while/if
+         finalizeSubmission() is running or has failed. -->
+    <span class="assignment-status" id="submissionStatus">
+      <span class="assignment-spinner" id="submissionSpinner"></span>
+      <span id="submissionStatusText"></span>
+      <button type="button" class="assignment-retry-btn" id="submissionRetryBtn" style="display:none;" onclick="retrySubmission()">Retry</button>
+    </span>
     <button class="btn btn-primary" id="btnNext" onclick="navigate(1)">Continue &rarr;</button>
   </div>
 
@@ -2013,9 +2022,17 @@
       <h2 style="margin-top:0;">Researcher Export (hidden panel)</h2>
       <p class="muted">This panel is not part of the participant flow. Press Ctrl+Shift+E or add ?admin=1 to the URL to
         reach it.</p>
-      <div style="display:flex;gap:10px;margin:14px 0;">
+
+      <!-- ===================== TEST MODE (DEV/QA ONLY) — Data Audit Summary ===================== -->
+      <h3>Data Audit Summary</h3>
+      <pre id="adminAuditSummary" style="max-height:260px;overflow:auto;"></pre>
+
+      <div style="display:flex;gap:10px;margin:14px 0;flex-wrap:wrap;">
         <button class="btn btn-primary" onclick="downloadJSON()">Download JSON</button>
         <button class="btn btn-secondary" onclick="downloadCSV()">Download CSV</button>
+        <button class="btn btn-secondary" onclick="exportRawDataJson()">Export Raw DATA (JSON)</button>
+        <button class="btn btn-secondary" onclick="exportAuditSummaryJson()">Export Audit Summary (JSON)</button>
+        <button class="btn btn-secondary" onclick="exportComparisonCsv()">Export Comparison Row (CSV)</button>
         <button class="btn btn-secondary"
           onclick="document.getElementById('adminOverlay').classList.remove('open')">Close</button>
       </div>
