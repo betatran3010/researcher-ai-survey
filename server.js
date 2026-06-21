@@ -11,6 +11,7 @@ const cors = require('cors');
 const crypto = require('crypto');
 const { Storage } = require('@google-cloud/storage');
 const { Firestore } = require('@google-cloud/firestore');
+const { cleanRecord, buildAccumulatedCsv } = require('./lib/export-csv');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -84,7 +85,23 @@ const storage = USE_LOCAL_SUBMISSION_FILE ? null : new Storage();
 // development authenticates to the real Firestore database via the same ADC
 // mechanism (see DEPLOYMENT.md for the exact `gcloud auth application-default
 // login` step).
-const firestore = new Firestore();
+//
+// Constructed LAZILY (on first actual use) rather than at module load. The
+// Firestore client constructor can block for a long time trying to discover
+// Application Default Credentials when none are configured and there is no
+// reachable metadata server (e.g. a CI box or this app's own HTTP-level
+// tests). Routes that don't touch Firestore-backed assignment — admin
+// export, static assets, health checks, etc. — must be able to boot the
+// server without ever paying that cost. Production behavior is unchanged:
+// any request that actually needs Firestore still constructs and uses a
+// real client exactly as before, on first use.
+let firestoreClient = null;
+function getFirestore() {
+  if (!firestoreClient) {
+    firestoreClient = new Firestore();
+  }
+  return firestoreClient;
+}
 
 // ---------- Security middleware ----------
 // Raised from 256kb: requests may now include downscaled JPEG page images
@@ -404,10 +421,10 @@ app.post('/api/assign-condition', async (req, res) => {
     }
 
     const hashed_participant_id = hashStableId(stable_participant_id);
-    const assignmentRef = firestore.collection(ASSIGNMENTS_COLLECTION).doc(hashed_participant_id);
-    const counterRef = firestore.collection(ASSIGNMENT_COUNTERS_COLLECTION).doc(expertise_stratum);
+    const assignmentRef = getFirestore().collection(ASSIGNMENTS_COLLECTION).doc(hashed_participant_id);
+    const counterRef = getFirestore().collection(ASSIGNMENT_COUNTERS_COLLECTION).doc(expertise_stratum);
 
-    const assignment = await firestore.runTransaction(async (t) => {
+    const assignment = await getFirestore().runTransaction(async (t) => {
       // Both reads happen before any write, as Firestore transactions
       // require — this is what lets Firestore detect a concurrent
       // conflicting transaction and retry one of them automatically.
@@ -590,7 +607,15 @@ app.post('/api/test-assign-condition', (req, res) => {
 // USE_LOCAL_SUBMISSION_FILE=true is the ONLY way to get the old append-only
 // data/submissions.jsonl behavior back, for local development without a GCP
 // project configured at all. This must never be the default in production.
-const DATA_DIR = path.join(__dirname, 'data');
+//
+// SUBMISSION_DATA_DIR is an optional override of where that local file lives,
+// used ONLY by the HTTP-level test suite so it can read/write throwaway
+// submissions.jsonl / test-submissions.jsonl files in a temp directory
+// instead of touching this repo's real local data/ files. Unset in normal
+// (dev or production) use, so the default path below is unchanged.
+const DATA_DIR = process.env.SUBMISSION_DATA_DIR
+  ? path.resolve(process.env.SUBMISSION_DATA_DIR)
+  : path.join(__dirname, 'data');
 const SUBMISSIONS_FILE = path.join(DATA_DIR, 'submissions.jsonl');
 const MAX_SUBMISSION_BODY_LEN = 5_000_000; // ~5MB, generous for a full participant record incl. AI transcripts
 
@@ -653,7 +678,7 @@ function saveSubmissionLocally(body) {
 async function markAssignmentCompleted(hashedId) {
   if (!isSha256Hex(hashedId)) return;
   try {
-    await firestore.collection(ASSIGNMENTS_COLLECTION).doc(hashedId).set({
+    await getFirestore().collection(ASSIGNMENTS_COLLECTION).doc(hashedId).set({
       completion_status: 'completed',
       completed_at: new Date().toISOString()
     }, { merge: true });
@@ -852,32 +877,25 @@ async function loadAllSubmissionRecords(type) {
   return records;
 }
 
-function flattenValueForCsv(v) {
-  if (v === null || v === undefined) return '';
-  if (typeof v === 'object') return JSON.stringify(v); // nested objects/arrays preserved as JSON text in one cell
-  return String(v);
-}
-
-function csvEscapeCell(v) {
-  const s = flattenValueForCsv(v);
-  if (/[",\n\r]/.test(s)) {
-    return '"' + s.replace(/"/g, '""') + '"';
-  }
-  return s;
-}
-
-// One CSV row per accumulated submission. Column set is the union of every
-// key present across all records (sorted for a stable, diffable header row),
-// so records from different cells/conditions that don't share every field
-// still line up correctly instead of being silently truncated.
-function recordsToCsv(records) {
-  const keySet = new Set();
-  records.forEach((r) => Object.keys(r || {}).forEach((k) => keySet.add(k)));
-  const keys = Array.from(keySet).sort();
-  const header = keys.map(csvEscapeCell).join(',');
-  const rows = records.map((r) => keys.map((k) => csvEscapeCell(r[k])).join(','));
-  return [header].concat(rows).join('\n') + '\n';
-}
+// The canonical, researcher-friendly CSV schema (flattened responses,
+// fixed-width AI transcript columns, derived AI/behavioral summaries, and a
+// handful of selected nested *_json columns) lives in lib/export-csv.js —
+// kept out of this file so it can be unit-tested directly against fixtures
+// without booting Express, GCS, or Firestore (see test/export.test.js). The
+// CSV deliberately does NOT include ai_message_log_json, behavioral_events_json,
+// or a raw_record_json column (removed per a later revision request, since
+// the fixed transcript/summary columns plus the JSON export below already
+// cover that information without duplicating large raw blobs into every
+// CSV row).
+//
+// The JSON export endpoint below deliberately does NOT use cleanRecord(): it
+// must return every complete stored record exactly as stored, with no
+// flattening, truncation, or deletion (spec point #3) — this is the
+// authoritative archive that still contains the complete ai_message_log,
+// behavioral_events, and all other original data for every record. Only the
+// CSV export uses cleanRecord() (via buildAccumulatedCsv, to strip the three
+// dead placeholder fields — see lib/export-csv.js — for a consistent column
+// set across old and new records).
 
 app.get('/api/admin/export-submissions.json', requireAdminExportKey, async (req, res) => {
   const type = parseAdminExportType(req);
@@ -901,7 +919,7 @@ app.get('/api/admin/export-submissions.csv', requireAdminExportKey, async (req, 
   }
   try {
     const records = await loadAllSubmissionRecords(type);
-    const csv = recordsToCsv(records);
+    const csv = buildAccumulatedCsv(records); // includes leading UTF-8 BOM for Excel
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="submissions-${type}-${todayDateStringUTC()}.csv"`);
     return res.send(csv);
@@ -911,6 +929,20 @@ app.get('/api/admin/export-submissions.csv', requireAdminExportKey, async (req, 
   }
 });
 
+// Researcher-facing export page. Deliberately NOT linked from the
+// participant-facing survey HTML/JS anywhere. The static file served below
+// contains no record counts, filenames, or any participant data — it is just
+// a key-entry form; every actual data request still goes through
+// requireAdminExportKey above and returns 401 without a valid key. The route
+// is reachable by direct URL (spec point #18, user correction #9), which is
+// fine as long as nothing protected is exposed before a valid X-Admin-Key
+// request succeeds — this static file alone never makes that request
+// automatically on load.
+app.get('/admin/export', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin-export.html'));
+});
+
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
+

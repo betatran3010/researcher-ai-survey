@@ -234,7 +234,7 @@ A URL param alone can never enable test mode — the frontend always confirms wi
 - Every record carries `test_mode` (`true` for test runs, `false` for real participants), plus `test_condition_override` and `test_paper_override` when set.
 - A visible purple banner ("TEST MODE — `<cell>` — `<paper1>` → `<paper2>`") appears fixed at the top of the page whenever test mode is active, and only then.
 
-**Data Audit Summary + exports:** open the existing hidden admin panel (Ctrl+Shift+E, or `?admin=1`) — it now also shows a live-computed audit summary (test status, assignment fields, page, answered/unanswered-required field counts, AI usage and timing per paper, prompt/response counts, revision/copy/paste/tab-switch/fullscreen-exit counts, quiz answers/score, submission status) and three export buttons: raw `DATA` JSON, audit-summary JSON, and a flat one-row comparison CSV. Filenames are sanitized and look like `survey-test-AI_pre-font-food-2026-06-21.json`.
+**Data Audit Summary + exports:** open the existing hidden admin panel (Ctrl+Shift+E, or `?admin=1`) — it shows a live-computed audit summary (test status, assignment fields, page, answered/unanswered-required field counts, AI usage and timing per paper, prompt/response counts, revision/copy/paste/tab-switch/fullscreen-exit counts, quiz answers/score, submission status) plus export buttons. These buttons (now labeled "Download Current Session JSON/CSV", "Export Raw DATA (JSON)", "Export Audit Summary (JSON)", "Export Comparison Row (CSV)") only ever export **this one browser tab's in-memory data** — handy for a quick local check while developing, but not the accumulated dataset. Filenames are sanitized and look like `survey-test-AI_pre-font-food-2026-06-21.json`. For the accumulated, all-participants export, see the next section.
 
 **Four pilot scenarios:**
 - **A — AI active-use test:** `?test=1&cell=AI_pre` (or `AI_post`), ask several AI questions, copy from a response, paste into an answer, revise it, then check the transcript/timing/copy-paste/revision fields in the audit summary.
@@ -246,14 +246,16 @@ A URL param alone can never enable test mode — the frontend always confirms wi
 
 ## Admin bulk export (researcher-only, separate from the in-session admin panel)
 
-The Ctrl+Shift+E admin panel's export buttons only ever export the **current browser session's** in-memory data. To pull **all accumulated submissions across every participant** from backend storage (GCS or the local `.jsonl` file, depending on `USE_LOCAL_SUBMISSION_FILE`), use these two protected backend routes instead — they are not linked from anywhere in the participant-facing UI:
+The Ctrl+Shift+E admin panel's export buttons only ever export the **current browser session's** in-memory data. To pull **all accumulated submissions across every participant** from backend storage (GCS or the local `.jsonl` file, depending on `USE_LOCAL_SUBMISSION_FILE`), use the researcher export page or the underlying routes directly — neither is linked from anywhere in the participant-facing UI:
 
-```
-GET /api/admin/export-submissions.json?type=production
-GET /api/admin/export-submissions.json?type=test
-GET /api/admin/export-submissions.csv?type=production
-GET /api/admin/export-submissions.csv?type=test
-```
+- **Researcher export page:** `https://<your-deployed-url>/admin/export` — a simple key-entry form with four download buttons (test/production x CSV/JSON). The admin key is typed in, sent only in the `X-Admin-Key` header, and cleared from the field immediately after every request (success or failure). The page itself reveals no record counts, filenames, or other participant data before a valid key is submitted.
+- **Underlying routes**, if you'd rather script it:
+  ```
+  GET /api/admin/export-submissions.json?type=production
+  GET /api/admin/export-submissions.json?type=test
+  GET /api/admin/export-submissions.csv?type=production
+  GET /api/admin/export-submissions.csv?type=test
+  ```
 
 - `type` defaults to `production` if omitted. `production` and `test` are always exported separately and never combined.
 - Both routes require the header `X-Admin-Key: <your ADMIN_EXPORT_KEY>`. Missing or wrong key → `401`. The key is never accepted as a query parameter and is never present in any frontend file.
@@ -265,7 +267,8 @@ GET /api/admin/export-submissions.csv?type=test
     --set-env-vars="ADMIN_EXPORT_KEY=your-long-random-value"
   ```
   If it's unset, both routes always return 401 — there's no "open" default.
-- JSON export returns the full nested record for every accumulated submission, unmodified. CSV export returns one row per submission, with one column per field seen across all records (nested objects/arrays are JSON-stringified into their cell).
+- **JSON export** returns the full nested record for every accumulated submission, exactly as stored — nothing flattened, renamed, or removed. Treat it as the authoritative archive.
+- **CSV export** is one row per participant, built by `lib/export-csv.js` (see `DATA_EXPORT.md` for the full column reference): all current SRL/CT items and quiz answers are discovered dynamically from the data (never a hard-coded expected count); a handful of known duplicate/raw-DOM-id response keys are deliberately excluded as standalone columns (they remain inside `responses_json`, and in full inside the JSON export); each participant's AI chat history is flattened into fixed `paper_1_*`/`paper_2_*` transcript columns (5 exchanges × 4 fields per assigned paper = 40 columns) rather than a raw JSON blob. Each transcript cell is one of three things, never confused: `N/A` for a slot that was never applicable at all (a No-AI participant, or an exchange number the participant never reached); blank (`''`) for a request that was made but failed, where the participant's own prompt/timestamp are still preserved but no AI response is invented; or the actual captured value for a successful exchange — see `DATA_EXPORT.md` for the full rule. No transcript cell is ever the literal string `undefined`/`null`. The CSV does **not** include `ai_message_log_json`, `behavioral_events_json`, or a `raw_record_json` column — those large raw structures are intentionally left out of the CSV and are only available in the JSON export, which remains the complete, nothing-removed archive (including full failure metadata for every AI request). The CSV escaper is hand-written (RFC4180-style: quotes around any cell containing a comma, quote, or newline, with internal quotes doubled) rather than a third-party library, because this sandbox had no npm registry access when this module was built; it is covered by automated tests in `test/export.test.js` and `test/admin-endpoints.test.js`, including multiline text, embedded commas/quotes, and Unicode round-trips.
 
 **Windows PowerShell download commands** (replace `<your-deployed-url>` and `<your-admin-key>`):
 
@@ -290,6 +293,14 @@ Invoke-WebRequest -Uri "https://<your-deployed-url>/api/admin/export-submissions
 ```
 
 For local testing against `http://localhost:3000`, just swap the URL.
+
+**Running the export tests locally** (no GCS/Firestore/OpenAI calls — pure local-file fixtures and a throwaway admin key):
+
+```bash
+npm run test:export
+```
+
+This runs `test/export.test.js` (39 checks against `lib/export-csv.js` directly, using fixture records in `test/fixtures/four-conditions.jsonl` covering all four AI x CT-placement conditions plus two additional records for the "Other" fallback and fixed-transcript-ordering tests, including the N/A-vs-blank transcript distinction) and `test/admin-endpoints.test.js` (8 checks that boot `server.js` itself with `USE_LOCAL_SUBMISSION_FILE=true` and confirm the 401/200 behavior and `/admin/export` page over real HTTP). Re-run this after any future change to `lib/export-csv.js`, `server.js`'s export routes, or `public/admin-export.html`.
 
 ## Security checklist
 

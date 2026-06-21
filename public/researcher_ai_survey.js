@@ -62,10 +62,14 @@ const DATA = {
   revision_log: [],
   copy_events: [],
   paste_events: [],
-  draft_history: [],
-  keystroke_counts: {},
+  // Removed (formerly draft_history: [], keystroke_counts: {}, quiz: {}):
+  // these three top-level fields were write-once-at-init placeholders, never
+  // read or written anywhere else in this file. Their real data already
+  // lives elsewhere and is unaffected by this removal:
+  //   - draft snapshots / per-question keystrokes -> logs[<fieldId>] (below)
+  //   - quiz answers                              -> responses['quiz_<paperId>_<qi>']
+  //   - quiz summary                               -> quiz_score / quiz_total (below)
   violations: [],
-  quiz: {},
   quiz_score: 0,
   quiz_total: 0,
   fullscreen_used: false,

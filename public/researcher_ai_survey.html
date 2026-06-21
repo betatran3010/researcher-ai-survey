@@ -2019,17 +2019,24 @@
   <!-- ============ HIDDEN ADMIN EXPORT OVERLAY ============ -->
   <div class="admin-overlay" id="adminOverlay">
     <div class="admin-box">
-      <h2 style="margin-top:0;">Researcher Export (hidden panel)</h2>
+      <h2 style="margin-top:0;">Researcher Export (hidden panel — dev tool only)</h2>
       <p class="muted">This panel is not part of the participant flow. Press Ctrl+Shift+E or add ?admin=1 to the URL to
         reach it.</p>
+      <p class="muted">
+        <strong>Current Session</strong> exports below only contain this one browser tab's in-memory data — useful for
+        a quick local check while developing. They are <em>not</em> the accumulated export. To download every stored
+        participant/test submission from the backend (the file to actually hand off for analysis), use
+        <a href="/admin/export" target="_blank" rel="noopener">/admin/export</a> instead, which reads all accumulated
+        records from backend storage and requires the admin export key.
+      </p>
 
       <!-- ===================== TEST MODE (DEV/QA ONLY) — Data Audit Summary ===================== -->
       <h3>Data Audit Summary</h3>
       <pre id="adminAuditSummary" style="max-height:260px;overflow:auto;"></pre>
 
       <div style="display:flex;gap:10px;margin:14px 0;flex-wrap:wrap;">
-        <button class="btn btn-primary" onclick="downloadJSON()">Download JSON</button>
-        <button class="btn btn-secondary" onclick="downloadCSV()">Download CSV</button>
+        <button class="btn btn-primary" onclick="downloadJSON()">Download Current Session JSON</button>
+        <button class="btn btn-secondary" onclick="downloadCSV()">Download Current Session CSV</button>
         <button class="btn btn-secondary" onclick="exportRawDataJson()">Export Raw DATA (JSON)</button>
         <button class="btn btn-secondary" onclick="exportAuditSummaryJson()">Export Audit Summary (JSON)</button>
         <button class="btn btn-secondary" onclick="exportComparisonCsv()">Export Comparison Row (CSV)</button>
