@@ -924,9 +924,20 @@ async function navigate(dir) {
   }
 
   const studyMatch = /^page-study-(\d)$/.exec(curId);
+
   if (studyMatch && dir > 0) {
-    const paperId = DATA['study_' + studyMatch[1] + '_id'];
-    if (paperId) finalizeStudyTiming(paperId);
+    const studyNumber = parseInt(studyMatch[1], 10);
+    const paperId = DATA['study_' + studyNumber + '_id'];
+
+    if (paperId) {
+      finalizeStudyTiming(paperId);
+    }
+
+    // Paper 2 is the final in-task page. Stop monitoring and leave
+    // fullscreen before advancing to the reflections section.
+    if (studyNumber === 2) {
+      await endTaskPhaseAndExitFullscreen();
+    }
   }
 
   collectFieldsNow();
@@ -1010,7 +1021,7 @@ function markStudyStart(slotId) {
   currentStudyPaperId = paperId;
 }
 
-// ---------- Validation (kept disabled per prior testing instruction) ----------
+// ---------- Required-response validation ----------
 function isFieldVisible(el) {
   if (!el) return false;
   return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
@@ -1081,17 +1092,17 @@ function validateCurrentPage() {
   // AI message boxes are deliberately excluded.
   // ------------------------------------------------------------
   pageEl
-  .querySelectorAll('textarea[data-logfield]')
-  .forEach(field => {
-    // On study pages, validate task answers even when the participant
-    // currently has the AI Assistant tab open and the Questions tab hidden.
-    // AI chat inputs do not have data-logfield, so they are never required.
-    if ((!isStudyPage && !isFieldVisible(field)) || field.disabled) return;
+    .querySelectorAll('textarea[data-logfield]')
+    .forEach(field => {
+      // On study pages, validate task answers even when the participant
+      // currently has the AI Assistant tab open and the Questions tab hidden.
+      // AI chat inputs do not have data-logfield, so they are never required.
+      if ((!isStudyPage && !isFieldVisible(field)) || field.disabled) return;
 
-    if (!field.value.trim()) {
-      markInvalid(field);
-    }
-  });
+      if (!field.value.trim()) {
+        markInvalid(field);
+      }
+    });
 
   // ------------------------------------------------------------
   // 3. Radio and checkbox question groups
@@ -1150,16 +1161,16 @@ function validateCurrentPage() {
   //    whose-thinking scales
   // ------------------------------------------------------------
   pageEl
-  .querySelectorAll('.conf-scale')
-  .forEach(scale => {
-    // The convincingness scale remains required even if it is temporarily
-    // hidden because the participant is viewing the AI Assistant tab.
-    if (!isStudyPage && !isFieldVisible(scale)) return;
+    .querySelectorAll('.conf-scale')
+    .forEach(scale => {
+      // The convincingness scale remains required even if it is temporarily
+      // hidden because the participant is viewing the AI Assistant tab.
+      if (!isStudyPage && !isFieldVisible(scale)) return;
 
-    if (!scale.querySelector('.conf-btn.selected')) {
-      markInvalid(null, scale);
-    }
-  });
+      if (!scale.querySelector('.conf-btn.selected')) {
+        markInvalid(null, scale);
+      }
+    });
 
   // ------------------------------------------------------------
   // 7. AI-experience sliders
@@ -1185,31 +1196,31 @@ function validateCurrentPage() {
     });
 
   if (!valid) {
-  // If the participant is viewing the AI tab, return them to Questions
-  // so they can see and complete the required in-task responses.
-  if (isStudyPage) {
-    const studyMatch = /^page-study-(\d+)$/.exec(pageId);
-    const paperId = studyMatch
-      ? DATA['study_' + studyMatch[1] + '_id']
-      : null;
+    // If the participant is viewing the AI tab, return them to Questions
+    // so they can see and complete the required in-task responses.
+    if (isStudyPage) {
+      const studyMatch = /^page-study-(\d+)$/.exec(pageId);
+      const paperId = studyMatch
+        ? DATA['study_' + studyMatch[1] + '_id']
+        : null;
 
-    if (paperId) {
-      switchWorkspaceTab(paperId, 'questions');
+      if (paperId) {
+        switchWorkspaceTab(paperId, 'questions');
+      }
     }
-  }
 
-  if (firstInvalid) {
-    setTimeout(() => {
-      firstInvalid.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center'
-      });
-    }, 0);
-  }
+    if (firstInvalid) {
+      setTimeout(() => {
+        firstInvalid.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+      }, 0);
+    }
 
-  alert('Please answer all questions on this page before continuing.');
-  return false;
-}
+    showWarnBanner('Please answer all questions on this page before continuing.');
+    return false;
+  }
 
   return true;
 }
@@ -1652,8 +1663,8 @@ function buildInstructionsPages() {
       ? `
         <ul class="instructions-bullets">
           ${page.bullets
-            .map(bullet => `<li>${escapeHtml(bullet)}</li>`)
-            .join('')}
+        .map(bullet => `<li>${escapeHtml(bullet)}</li>`)
+        .join('')}
         </ul>
       `
       : '';
@@ -2669,6 +2680,34 @@ function prepareReflectionsPage() {
   buildPaperScaleRows('understandWrap', 'understood');
   if (DATA.condition === 'AI') {
     buildPerPaperAiReflections();
+  }
+}
+
+async function endTaskPhaseAndExitFullscreen() {
+  // Stop behavioral-violation monitoring before exiting fullscreen,
+  // so this expected task-completion exit is not logged as a violation.
+  inTaskPhase = false;
+  currentStudyPaperId = null;
+
+  hideFullscreenRequiredOverlay();
+
+  if (document.fullscreenElement) {
+    const exit =
+      document.exitFullscreen ||
+      document.webkitExitFullscreen ||
+      document.mozCancelFullScreen ||
+      document.msExitFullscreen;
+
+    if (exit) {
+      try {
+        await exit.call(document);
+      } catch (err) {
+        console.warn(
+          'Could not automatically exit fullscreen after the task:',
+          err
+        );
+      }
+    }
   }
 }
 
