@@ -1439,8 +1439,6 @@ function setupRoleYearsField(containerId, fieldName, options) {
 }
 
 // ---------- Instructions pages ----------
-const INSTRUCTIONS_TITLE = 'Paper Evaluation Task';
-
 // Verbatim from the spec doc's "Instructions Shown to All Participants"
 // section, split per mentor comments #4/#5 ("Split instructions into
 // separate pages where participants have to click next to encourage
@@ -1572,7 +1570,7 @@ function buildInstructionsPages() {
     // task title) — later pages are a continuation of the same section, as
     // with the quiz transition/question pages.
     const headerHtml = i === 0
-      ? `<div class="section-label"><div class="section-number" id="secnum-task">5</div><div class="section-title">Task</div></div>`
+      ? `<div class="section-label"><div class="section-number" id="secnum-task">5</div><div class="section-title">Paper Evaluation Task</div></div>`
       : '';
     const titleHtml = i === 0 ? `<p class="instructions-title">${escapeHtml(INSTRUCTIONS_TITLE)}</p>` : '';
     const paraHtml = page.paragraphs.map(t => `<p style="margin-bottom:14px;">${escapeHtml(t)}</p>`).join('');
