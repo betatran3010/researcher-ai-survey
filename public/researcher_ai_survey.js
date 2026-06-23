@@ -1030,6 +1030,7 @@ function validateCurrentPage() {
   // Pages containing instructions, transitions, or debrief text have
   // nothing for the participant to answer.
   const pageId = pageEl.id;
+  const isStudyPage = /^page-study-\d+$/.test(pageId);
   const noResponseRequired =
     pageId === 'page-instructions' ||
     /^page-instructions-/.test(pageId) ||
@@ -1080,14 +1081,17 @@ function validateCurrentPage() {
   // AI message boxes are deliberately excluded.
   // ------------------------------------------------------------
   pageEl
-    .querySelectorAll('textarea[data-logfield]')
-    .forEach(field => {
-      if (!isFieldVisible(field) || field.disabled) return;
+  .querySelectorAll('textarea[data-logfield]')
+  .forEach(field => {
+    // On study pages, validate task answers even when the participant
+    // currently has the AI Assistant tab open and the Questions tab hidden.
+    // AI chat inputs do not have data-logfield, so they are never required.
+    if ((!isStudyPage && !isFieldVisible(field)) || field.disabled) return;
 
-      if (!field.value.trim()) {
-        markInvalid(field);
-      }
-    });
+    if (!field.value.trim()) {
+      markInvalid(field);
+    }
+  });
 
   // ------------------------------------------------------------
   // 3. Radio and checkbox question groups
@@ -1146,14 +1150,16 @@ function validateCurrentPage() {
   //    whose-thinking scales
   // ------------------------------------------------------------
   pageEl
-    .querySelectorAll('.conf-scale')
-    .forEach(scale => {
-      if (!isFieldVisible(scale)) return;
+  .querySelectorAll('.conf-scale')
+  .forEach(scale => {
+    // The convincingness scale remains required even if it is temporarily
+    // hidden because the participant is viewing the AI Assistant tab.
+    if (!isStudyPage && !isFieldVisible(scale)) return;
 
-      if (!scale.querySelector('.conf-btn.selected')) {
-        markInvalid(null, scale);
-      }
-    });
+    if (!scale.querySelector('.conf-btn.selected')) {
+      markInvalid(null, scale);
+    }
+  });
 
   // ------------------------------------------------------------
   // 7. AI-experience sliders
@@ -1179,16 +1185,31 @@ function validateCurrentPage() {
     });
 
   if (!valid) {
-    if (firstInvalid) {
+  // If the participant is viewing the AI tab, return them to Questions
+  // so they can see and complete the required in-task responses.
+  if (isStudyPage) {
+    const studyMatch = /^page-study-(\d+)$/.exec(pageId);
+    const paperId = studyMatch
+      ? DATA['study_' + studyMatch[1] + '_id']
+      : null;
+
+    if (paperId) {
+      switchWorkspaceTab(paperId, 'questions');
+    }
+  }
+
+  if (firstInvalid) {
+    setTimeout(() => {
       firstInvalid.scrollIntoView({
         behavior: 'smooth',
         block: 'center'
       });
-    }
-
-    alert('Please answer all questions on this page before continuing.');
-    return false;
+    }, 0);
   }
+
+  alert('Please answer all questions on this page before continuing.');
+  return false;
+}
 
   return true;
 }
