@@ -1647,6 +1647,10 @@ function buildInstructionsPages() {
       </div>
     `;
 
+    const paragraphs = Array.isArray(page.paragraphs)
+      ? page.paragraphs
+      : [];
+
     const paraHtml = paragraphs
       .map(text => {
         const safeText = escapeHtml(text)
