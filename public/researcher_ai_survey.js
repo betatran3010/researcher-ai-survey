@@ -1493,7 +1493,8 @@ const INSTRUCTIONS_PAGES_AI_ONLY = [
     bullets: [
       'Questions, where you will enter your responses',
       'AI Assistant, where you can interact with the AI assistant who has context of the study you are reviewing (no need to copy and paste the study to the AI)'
-    ]
+    ],
+    mockup: 'ai'
   },
   {
     paragraphs: [
@@ -1503,8 +1504,7 @@ const INSTRUCTIONS_PAGES_AI_ONLY = [
   {
     paragraphs: [
       'You may send up to FIVE queries to the AI assistant for each study. The number of messages remaining will be displayed in the AI Assistant tab. You will receive the SAME compensation regardless of how much you use AI.'
-    ],
-    mockup: 'ai'
+    ]
   }
 ];
 
