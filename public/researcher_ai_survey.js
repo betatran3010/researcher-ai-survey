@@ -40,7 +40,7 @@ const DATA = {
   ai_condition: null,               // mirrors condition
   critical_thinking_placement: null,// mirrors ct_scale_placement
   research_role: null,              // exact selected role string, as returned by the server
-  research_role_years: null,        // PhD student only — years in program, as returned by the server
+  research_role_years: null,        // years in program/position when applicable, as returned by the server
   assignment_cell: null,            // combined cell label, e.g. "AI_pre" — authoritative, server-generated
   assignment_assigned_at: null,     // server timestamp the assignment was made
   assignment_source: null,          // assignment method, e.g. "deterministic_server_hash"
@@ -73,6 +73,16 @@ const DATA = {
   violations: [],
   quiz_score: 0,
   quiz_total: 0,
+
+  quiz_paper_scores: {
+    font: null,
+    food: null,
+    listing: null
+  },
+
+  quiz_option_orders: {},
+  quiz_question_orders: {},
+
   fullscreen_used: false,
   logs: {},
 
@@ -639,9 +649,11 @@ async function assignConditionAndOrder(researchRole, researchRoleYears) {
   // text, so this only matters when a changed role would cross strata.)
   const cached = readAssignmentCache(stableId);
   let effectiveRole = researchRole;
+  let effectiveRoleYears = researchRoleYears;
   let roleLockedToOriginal = false;
   if (cached && cached.research_role && cached.research_role !== researchRole) {
     effectiveRole = cached.research_role;
+    effectiveRoleYears = cached.research_role_years ?? researchRoleYears;
     roleLockedToOriginal = true;
   }
 
@@ -651,7 +663,7 @@ async function assignConditionAndOrder(researchRole, researchRoleYears) {
     body: JSON.stringify({
       stable_participant_id: stableId,
       research_role: effectiveRole,
-      research_role_years: researchRoleYears
+      research_role_years: effectiveRoleYears
     })
   });
   if (!resp.ok) {
@@ -703,6 +715,7 @@ async function assignConditionAndOrder(researchRole, researchRoleYears) {
 
   writeAssignmentCache(stableId, {
     research_role: DATA.research_role,
+    research_role_years: DATA.research_role_years,
     research_expertise_stratum: DATA.research_expertise_stratum,
     ai_condition: DATA.ai_condition,
     critical_thinking_placement: DATA.critical_thinking_placement,
@@ -1309,7 +1322,7 @@ function submitConsentPage() {
     flagGroupError(document.getElementById('rg-familiar'));
     ok = false;
   }
-  if (!consentCb.checked || !mediaCb.checked) {
+  if (!consentCb.checked) {
     ok = false;
   }
   if (!ok) {
@@ -1329,7 +1342,7 @@ function submitConsentPage() {
   DATA.prolific_id = prolific;
   DATA.consent = true;
   DATA.consent_status = 'granted';
-  DATA.media_release_status = 'granted';
+  DATA.media_release_status = mediaCb.checked ? 'granted' : 'declined';
 
   buildPageOrder();
   currentIdx = pageOrder.indexOf('page-about-you');
@@ -1466,7 +1479,7 @@ function setupRoleYearsField(containerId, fieldName, options) {
     wrapEl.style.marginTop = '10px';
     wrapEl.style.display = 'none';
     wrapEl.innerHTML = `<div class="q-sublabel" id="${containerId}-years-label" style="margin-bottom:6px;"></div>
-      <input type="number" id="${fieldName}_years" min="0" step="1" placeholder="Number of years">`;
+      <input type="number" id="${fieldName}_years" min="1" step="1" placeholder="Number of years">`;
     container.insertAdjacentElement('afterend', wrapEl);
   }
   const labelEl = document.getElementById(containerId + '-years-label');
@@ -2625,7 +2638,7 @@ document.addEventListener('paste', event => {
     }
   }
 
-  DATA.paste_events.push({
+  const pasteEvent = {
     participant_id: DATA.participant_id,
     paper_id: target.paper_id,
     event_type: 'paste',
@@ -2644,7 +2657,23 @@ document.addEventListener('paste', event => {
       target.target_type
     ),
     ts: nowIso()
-  });
+  };
+
+  DATA.paste_events.push(pasteEvent);
+
+  // Capture the answer state immediately after the browser applies the paste.
+  // The exporter uses this snapshot to quantify how much the final answer
+  // changed after the latest verified AI-to-answer paste.
+  if (
+    target.target_type === 'participant_answer' &&
+    event.target instanceof HTMLTextAreaElement
+  ) {
+    const answerField = event.target;
+    setTimeout(() => {
+      pasteEvent.answer_value_after_paste = answerField.value;
+      pasteEvent.answer_state_captured_at = nowIso();
+    }, 0);
+  }
 });
 
 // ---------- Reflections page ----------
@@ -2782,7 +2811,7 @@ document.addEventListener('change', (e) => {
 // page before each paper's block of questions ("You will first/Next answer
 // four questions about: <title>") so participants can tell which paper a
 // question belongs to and when the quiz moves to the second paper. The
-// transition page auto-advances after 5s (see showPage()/quizTransitionTimer)
+// transition page auto-advances after 3s (see showPage()/quizTransitionTimer)
 // rather than using the Continue button. DATA.study_order holds the two
 // assigned paper ids in the same order the participant evaluated them (the
 // unassigned third pool paper is never in this array, so its quiz/transition
@@ -2835,6 +2864,7 @@ function buildQuizPages() {
       </div>
     </div>`;
     const questionOrder = shuffleArray(PAPERS[paperId].quiz.map((_, i) => i));
+    DATA.quiz_question_orders[paperId] = questionOrder.slice();
     questionOrder.forEach(qi => {
       const qObj = PAPERS[paperId].quiz[qi];
       const pageId = 'page-quiz-' + paperId + '-' + qi;
@@ -2848,6 +2878,7 @@ function buildQuizPages() {
       const letters = ['A', 'B', 'C', 'D'];
       const plainOptions = qObj.options.map(opt => opt.replace(/^[A-D]\.\s*/, ''));
       const shuffledIdx = shuffleArray(plainOptions.map((_, i) => i));
+      DATA.quiz_option_orders[name] = shuffledIdx.map(origIdx => letters[origIdx]);
       QUIZ_RUNTIME_CORRECT[name] = letters[shuffledIdx.indexOf(qObj.correct.charCodeAt(0) - 'A'.charCodeAt(0))];
 
       const optsHtml = shuffledIdx.map((origIdx, newPos) => {
@@ -2873,7 +2904,10 @@ function buildQuizPages() {
 
 function finishQuiz() {
   let score = 0, total = 0;
+  DATA.quiz_paper_scores = { font: null, food: null, listing: null };
+
   DATA.study_order.forEach(paperId => {
+    let paperScore = 0;
     PAPERS[paperId].quiz.forEach((qObj, qi) => {
       total++;
       const name = 'quiz_' + paperId + '_' + qi;
@@ -2881,9 +2915,14 @@ function finishQuiz() {
       const val = chosen ? chosen.value : null;
       DATA.responses[name] = val;
       const correctLetter = QUIZ_RUNTIME_CORRECT[name] || qObj.correct;
-      if (val === correctLetter) score++;
+      if (val === correctLetter) {
+        score++;
+        paperScore++;
+      }
     });
+    DATA.quiz_paper_scores[paperId] = paperScore;
   });
+
   DATA.quiz_score = score;
   DATA.quiz_total = total;
 }

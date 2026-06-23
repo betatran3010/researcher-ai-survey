@@ -11,7 +11,7 @@ const cors = require('cors');
 const crypto = require('crypto');
 const { Storage } = require('@google-cloud/storage');
 const { Firestore } = require('@google-cloud/firestore');
-const { cleanRecord, buildAccumulatedCsv } = require('./lib/export-csv');
+const { cleanRecord, buildAccumulatedCsv, buildAiTranscriptCsv } = require('./lib/export-csv');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -224,21 +224,16 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const systemPrompt =
-      'You are a helpful assistant supporting a user who is evaluating a research study. ' +
-      'The full text of the study is provided in this conversation, and for the current question you may also ' +
-      'be shown images of the study\'s pages so you can read figures, tables, and other visual elements directly. ' +
-      'Answer the user\'s question using only the supplied study (text and/or images) and sound general reasoning; ' +
-      'if the study does not contain enough information to answer, say so rather than speculating. ' +
-      'The supplied text may not fully capture figures, tables, or other visual elements of the study; if no page ' +
-      'images were provided and a question depends on such content, say so explicitly rather than guessing. ' +
-      'Do not reference studies outside this task. ' +
-      'Keep each response under about 200 words and make sure it is complete and self-contained within that limit. ' +
-      'Format responses for easy reading in a narrow chat panel. Use short paragraphs or a brief numbered list when discussing multiple points. ' +
-      'Avoid large headings. Do not place several numbered points in one paragraph. ' +
-      'If needed, narrow the scope of your answer rather than running long. ' +
-      'Do not provide content that would facilitate harm or illegal activity; if a request cannot be answered safely, briefly note why.\n\n' +
-      'Study title: ' + study_title + '\n\n' +
-      'Study text:\n' + study_text;
+      "You are a critical and rigorous research evaluator assisting a peer reviewer. " +
+      "The full text of the study is provided in this conversation, and you may also be shown images of the study pages so you can inspect figures, tables, and other visual elements. " +
+      "Answer the user's question using only the supplied study and sound analytical reasoning. If the study does not contain enough information to answer, say so rather than speculating. " +
+      "Do not reference studies outside this task. Focus on methodology, evidence quality, and reasoning. " +
+      "Keep each response under about 200 words and no more than five sentences, and make it complete and self-contained within that limit. " +
+      "Format responses for easy reading in a narrow chat panel using short paragraphs or a brief numbered list; avoid large headings and do not place several numbered points in one paragraph. " +
+      "If needed, narrow the scope of the answer rather than running long. " +
+      "Do not provide content that would facilitate harm or illegal activity; if a request cannot be answered safely, briefly note why.\n\n" +
+      "Study title: " + study_title + "\n\n" +
+      "Study text:\n" + study_text;
 
     const messages = [{ role: 'system', content: systemPrompt }];
     conversation_history.forEach(turn => {
@@ -269,8 +264,8 @@ app.post('/api/chat', async (req, res) => {
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages,
-        max_tokens: 800,
-        temperature: 0.7
+        max_tokens: 300,
+        temperature: 0.3
       })
     });
 
@@ -337,16 +332,28 @@ const ROLE_TIER_MAP = {
   'Postdoctoral scholar': 'higher'
 };
 
+const ROLES_REQUIRING_YEARS = new Set([
+  "Master's student",
+  'PhD student',
+  'Postdoctoral scholar'
+]);
+
+function normalizeResearchRoleYears(research_role, rawYears) {
+  if (!ROLES_REQUIRING_YEARS.has(research_role)) return null;
+  const years = Number(rawYears);
+  return Number.isInteger(years) && years >= 1 ? years : null;
+}
+
 // Returns the expertise stratum ('lower' | 'higher') for a given role, or
 // null if the role/years combination is invalid or unrecognized. PhD
-// student is the only role whose stratum depends on a second value
-// (years in the program); every other role maps directly via
-// ROLE_TIER_MAP.
+// student's stratum depends on years in the program (1 = lower, 2+ = higher).
 function deriveExpertiseStratum(research_role, research_role_years) {
   if (research_role === 'PhD student') {
-    const years = Number(research_role_years);
-    if (!Number.isFinite(years) || years < 1) return null;
-    return years <= 1 ? 'lower' : 'higher';
+    if (!Number.isInteger(research_role_years) || research_role_years < 1) return null;
+    return research_role_years === 1 ? 'lower' : 'higher';
+  }
+  if (ROLES_REQUIRING_YEARS.has(research_role) && !Number.isInteger(research_role_years)) {
+    return null;
   }
   return ROLE_TIER_MAP[research_role] || null;
 }
@@ -419,7 +426,10 @@ app.post('/api/assign-condition', async (req, res) => {
   try {
     const rawStableId = req.body && req.body.stable_participant_id;
     const research_role = req.body && req.body.research_role;
-    const research_role_years = req.body && req.body.research_role_years;
+    const research_role_years = normalizeResearchRoleYears(
+      research_role,
+      req.body && req.body.research_role_years
+    );
 
     if (!isNonEmptyString(rawStableId) || rawStableId.length > 200) {
       return res.status(400).json({ error: 'Invalid stable_participant_id.' });
@@ -433,7 +443,7 @@ app.post('/api/assign-condition', async (req, res) => {
     // stratum, and nothing here trusts one even if it did.
     const expertise_stratum = deriveExpertiseStratum(research_role, research_role_years);
     if (!expertise_stratum) {
-      return res.status(400).json({ error: 'Invalid or unrecognized research_role (or missing/invalid research_role_years for PhD student).' });
+      return res.status(400).json({ error: 'Invalid or unrecognized research_role, or missing/invalid research_role_years for the selected role.' });
     }
 
     const hashed_participant_id = hashStableId(stable_participant_id);
@@ -475,7 +485,7 @@ app.post('/api/assign-condition', async (req, res) => {
       const assignmentDoc = {
         hashed_participant_id,
         research_role,
-        research_role_years: (research_role === 'PhD student') ? Number(research_role_years) : null,
+        research_role_years,
         research_expertise_stratum: expertise_stratum,
         ai_condition: chosenCell.ai_condition,
         critical_thinking_placement: chosenCell.ct_placement,
@@ -584,8 +594,16 @@ app.post('/api/test-assign-condition', (req, res) => {
   }
 
   const research_role = (req.body && typeof req.body.research_role === 'string') ? req.body.research_role : null;
-  const research_role_years = req.body && req.body.research_role_years;
+  const research_role_years = normalizeResearchRoleYears(
+    research_role,
+    req.body && req.body.research_role_years
+  );
   const research_expertise_stratum = deriveExpertiseStratum(research_role, research_role_years);
+  if (!research_expertise_stratum) {
+    return res.status(400).json({
+      error: 'Invalid or unrecognized research_role, or missing/invalid research_role_years for the selected role.'
+    });
+  }
 
   // Synthetic id: a SHA-256-shaped string (so it satisfies isSha256Hex(), the
   // same format real assignments use) but derived purely from random bytes —
@@ -599,7 +617,7 @@ app.post('/api/test-assign-condition', (req, res) => {
   return res.json({
     stable_assignment_id_hash: syntheticHash,
     research_role,
-    research_role_years: (research_role === 'PhD student' && Number.isFinite(Number(research_role_years))) ? Number(research_role_years) : null,
+    research_role_years,
     research_expertise_stratum,
     ai_condition: chosenCell.ai_condition,
     critical_thinking_placement: chosenCell.ct_placement,
@@ -946,6 +964,24 @@ app.get('/api/admin/export-submissions.csv', requireAdminExportKey, async (req, 
   } catch (err) {
     console.error('[api/admin/export-submissions.csv] Error', err);
     return res.status(500).json({ error: 'Could not export submissions.' });
+  }
+});
+
+
+app.get('/api/admin/export-ai-transcript.csv', requireAdminExportKey, async (req, res) => {
+  const type = parseAdminExportType(req);
+  if (!type) {
+    return res.status(400).json({ error: 'Invalid type query param. Use ?type=production or ?type=test.' });
+  }
+  try {
+    const records = await loadAllSubmissionRecords(type);
+    const csv = buildAiTranscriptCsv(records);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="ai-transcript-${type}-${todayDateStringUTC()}.csv"`);
+    return res.send(csv);
+  } catch (err) {
+    console.error('[api/admin/export-ai-transcript.csv] Error', err);
+    return res.status(500).json({ error: 'Could not export AI transcript.' });
   }
 });
 
