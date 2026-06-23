@@ -1,0 +1,2050 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How Researchers Read and Evaluate Papers</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,500;1,400&family=Inter:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --bg-card: #ffffff;
+      --navy: #003262;
+      --navy-light: #001f3f;
+      --terra: #fdb515;
+      --terra-light: #ffd34d;
+      --accent-soft: #faf6ee;
+      --accent-softer: #fcfaf6;
+      --warm-gray: #bc9b6a;
+      --bronze-soft: #faf6ee;
+      --border: #d9e2ec;
+      --border-strong: #b8c6d6;
+      --text: #172033;
+      --text-light: #5f6f82;
+      --danger: #b33a3a;
+      --warn: #9a6700;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      font-size: 16px;
+    }
+
+    body {
+      background: radial-gradient(circle at top left, rgba(0, 50, 98, .045), transparent 360px), var(--bg);
+      color: var(--text);
+      font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-weight: 400;
+      font-size: 1.1rem;
+      line-height: 1.6;
+      min-height: 100vh;
+      padding-bottom: 78px;
+      padding-top: 6px;
+    }
+
+    .progress-track {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: var(--border);
+      z-index: 100;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--navy), var(--warm-gray), var(--terra));
+      width: 0%;
+      transition: width .25s;
+    }
+
+    .top-meta {
+      display: none;
+    }
+
+    .site-header {
+      padding: 22px 28px 20px;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+      background: #ffffff;
+      box-shadow: 0 4px 18px rgba(0, 50, 98, .045);
+    }
+
+    .site-header h1 {
+      font-family: 'Inter', sans-serif;
+      font-size: 2.3rem;
+      font-weight: 800;
+      color: var(--navy);
+      letter-spacing: -0.035em;
+      line-height: 1.15;
+    }
+
+    .site-header p {
+      margin-top: 8px;
+      color: var(--text-light);
+      font-size: 1.02rem;
+      max-width: 720px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .page {
+      display: none;
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 64px 32px 28px;
+      animation: fadeIn .35s ease;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    .page.study-page {
+      max-width: 1320px;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    h1 {
+      font-family: 'Inter', sans-serif;
+      font-size: 2.1rem;
+      font-weight: 800;
+      color: var(--navy);
+      letter-spacing: -0.03em;
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      font-family: 'Inter', sans-serif;
+      font-size: 1.65rem;
+      font-weight: 780;
+      color: var(--navy);
+      letter-spacing: -0.025em;
+      margin: 0 0 18px;
+    }
+
+    h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--navy);
+      margin: 18px 0 8px;
+    }
+
+    p {
+      font-size: 1.03rem;
+      line-height: 1.7;
+    }
+
+    .muted {
+      color: var(--text-light);
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+
+    .kicker {
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-size: .75rem;
+      font-weight: 700;
+      color: var(--terra);
+      margin-bottom: 10px;
+    }
+
+    .section-label {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 8px 0 24px;
+    }
+
+    .section-number {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      background: var(--navy);
+      color: #fff;
+      font-size: .75rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .section-title {
+      font-family: 'Inter', sans-serif;
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--navy-light);
+    }
+
+    .q-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      box-shadow: 0 12px 34px rgba(0, 50, 98, .075);
+      padding: 36px 40px;
+      margin-bottom: 28px;
+    }
+
+    .q-card.secondary {
+      border-color: var(--border);
+    }
+
+    .q-card.intro-card {
+      background: linear-gradient(135deg, #ffffff 0%, #f9fbfd 100%);
+      border-left: 5px solid var(--navy);
+    }
+
+    .q-label {
+      font-size: 1.08rem;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.55;
+      margin-bottom: 18px;
+    }
+
+    /* Smaller section-style label shown above a quiz question to identify which
+   study the question belongs to (distinct from .q-label, the question text
+   itself) — see buildQuizPages() in researcher_ai_survey.js. */
+    .quiz-paper-title {
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--warm-gray);
+      margin-bottom: 10px;
+    }
+
+    .q-sublabel {
+      font-size: .85rem;
+      color: var(--text-light);
+      margin-bottom: 14px;
+      margin-top: -8px;
+      line-height: 1.5;
+    }
+
+    textarea {
+      width: 100%;
+      border: 1.5px solid var(--border);
+      border-radius: 13px;
+      padding: 16px 18px;
+      font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-size: 1.02rem;
+      font-weight: 400;
+      color: var(--text);
+      background: #fff;
+      resize: vertical;
+      min-height: 150px;
+      transition: border-color .2s, box-shadow .2s;
+      line-height: 1.6;
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: var(--navy);
+      box-shadow: 0 0 0 4px rgba(47, 93, 124, .12);
+    }
+
+    textarea::placeholder {
+      color: var(--warm-gray);
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select {
+      width: 100%;
+      border: 1.5px solid var(--border);
+      border-radius: 13px;
+      padding: 16px 18px;
+      font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-size: 1.02rem;
+      font-weight: 400;
+      color: var(--text);
+      background: #fff;
+      transition: border-color .2s, box-shadow .2s;
+    }
+
+    input[type="text"]:focus,
+    input[type="number"]:focus {
+      outline: none;
+      border-color: var(--navy);
+      box-shadow: 0 0 0 4px rgba(47, 93, 124, .12);
+    }
+
+    .input-group {
+      margin-bottom: 14px;
+    }
+
+    .input-label {
+      font-size: .85rem;
+      color: var(--text-light);
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    .metaphor-field {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .metaphor-label {
+      font-size: .85rem;
+      font-weight: 600;
+      color: var(--text-light);
+      padding-top: 15px;
+      min-width: 100px;
+      flex-shrink: 0;
+    }
+
+    .options-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .options-grid.row {
+      flex-direction: row;
+      flex-wrap: wrap;
+    }
+
+    .option-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 18px 20px;
+      min-height: 58px;
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      cursor: pointer;
+      transition: all .18s ease;
+      background: #fff;
+    }
+
+    .option-item:hover {
+      border-color: var(--warm-gray);
+      background: var(--accent-softer);
+    }
+
+    .option-item.selected {
+      border-color: var(--warm-gray);
+      background: var(--bronze-soft);
+      box-shadow: 0 0 0 2px rgba(188, 155, 106, .12);
+    }
+
+    .option-item.selected .option-text {
+      color: var(--navy);
+      font-weight: 600;
+    }
+
+    .option-item input {
+      display: none;
+    }
+
+    .option-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid var(--border-strong);
+      flex-shrink: 0;
+      margin-top: 2px;
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+    }
+
+    .option-item.selected .option-dot {
+      border-color: var(--warm-gray);
+      background: #fff;
+    }
+
+    .option-dot::after {
+      content: '';
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--terra);
+      display: none;
+    }
+
+    .option-item.selected .option-dot::after {
+      display: block;
+    }
+
+    /* Checkbox-type option items (multi-select "Select all that apply" questions)
+   reuse the same .option-item/.option-dot markup as radio items, but should
+   look like a standard checkbox (square, checkmark) rather than a radio
+   button (circle, filled dot) so the UI signals multi-select at a glance. */
+    .option-item input[type="checkbox"]+.option-dot {
+      border-radius: 0;
+    }
+
+    .option-item input[type="checkbox"]+.option-dot::after {
+      width: auto;
+      height: auto;
+      border-radius: 0;
+      background: none;
+      content: '✓';
+      color: var(--terra);
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .option-item.selected input[type="checkbox"]+.option-dot::after {
+      display: block;
+    }
+
+    .option-text {
+      font-size: 1rem;
+      line-height: 1.5;
+      color: var(--text);
+    }
+
+    .likert-item {
+      margin-bottom: 22px;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .likert-item:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .likert-statement {
+      font-size: .95rem;
+      color: var(--text);
+      line-height: 1.55;
+      margin-bottom: 12px;
+    }
+
+    .likert-scale {
+      display: flex;
+      gap: 6px;
+    }
+
+    .likert-btn {
+      flex: 1;
+      min-height: 40px;
+      border-radius: 8px;
+      border: 1.5px solid var(--border);
+      background: #fff;
+      cursor: pointer;
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--text-light);
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .likert-btn.selected {
+      background: var(--navy);
+      border-color: var(--navy);
+      color: #fff;
+    }
+
+    .likert-ends {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+    }
+
+    .likert-end {
+      font-size: .75rem;
+      color: var(--warm-gray);
+    }
+
+    .conf-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin: 0 0 16px;
+      flex-wrap: wrap;
+    }
+
+    .conf-label {
+      font-size: .87rem;
+      color: var(--text-light);
+      min-width: 180px;
+      flex: 1;
+    }
+
+    .conf-scale {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .conf-btn {
+      flex: 1;
+      width: auto;
+      min-width: 0;
+      height: 40px;
+      border-radius: 8px;
+      border: 1.5px solid var(--border);
+      background: #fff;
+      cursor: pointer;
+      font-size: .8rem;
+      font-weight: 600;
+      color: var(--text-light);
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .conf-btn.selected {
+      background: var(--navy);
+      border-color: var(--navy);
+      color: #fff;
+    }
+
+    .scale-ends {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      width: 100%;
+      margin-top: 6px;
+    }
+
+    .scale-end {
+      font-size: .75rem;
+      color: var(--warm-gray);
+      line-height: 1.35;
+      flex: 1;
+    }
+
+    .scale-end:first-child {
+      text-align: left;
+    }
+
+    .scale-end.right {
+      text-align: right;
+    }
+
+    .conf-scale+.scale-ends {
+      width: 100%;
+      max-width: none;
+    }
+
+    .slider-block {
+      margin-bottom: 30px;
+      padding-bottom: 30px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .slider-block:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .slider-q {
+      font-size: .9rem;
+      font-weight: 600;
+      color: var(--navy-light);
+      margin-bottom: 14px;
+    }
+
+    .slider-ends {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .slider-end {
+      font-size: .8rem;
+      color: var(--text-light);
+      line-height: 1.4;
+      max-width: 160px;
+    }
+
+    .slider-end.right {
+      text-align: right;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      -webkit-appearance: none;
+      height: 5px;
+      border-radius: 3px;
+      background: linear-gradient(to right, var(--terra) 50%, var(--border) 50%);
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid var(--terra);
+      cursor: pointer;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .15);
+    }
+
+    .nav-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(255, 255, 255, .96);
+      backdrop-filter: blur(10px);
+      border-top: 1px solid var(--border);
+      box-shadow: 0 -4px 20px rgba(0, 50, 98, .06);
+      padding: 14px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 80;
+    }
+
+    .nav-label {
+      font-size: .84rem;
+      color: var(--warm-gray);
+      font-weight: 600;
+    }
+
+    .assignment-status {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      font-size: .86rem;
+      font-weight: 600;
+    }
+
+    .assignment-status.loading { color: var(--warm-gray); }
+    .assignment-status.error { color: #b3261e; }
+
+    .assignment-spinner {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid rgba(0, 0, 0, .15);
+      border-top-color: var(--terra);
+      animation: assignment-spin .7s linear infinite;
+    }
+
+    @keyframes assignment-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .assignment-retry-btn {
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid #b3261e;
+      background: #fff;
+      color: #b3261e;
+      font-weight: 700;
+      font-size: .82rem;
+      cursor: pointer;
+    }
+
+    .btn {
+      padding: 13px 26px;
+      border-radius: 12px;
+      border: none;
+      cursor: pointer;
+      font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-size: .95rem;
+      font-weight: 700;
+      letter-spacing: .01em;
+      transition: all .2s;
+    }
+
+    .btn-primary {
+      background: var(--navy);
+      color: #fff;
+      box-shadow: 0 6px 18px rgba(0, 50, 98, .18);
+    }
+
+    .btn-primary:hover {
+      background: var(--navy-light);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-light);
+      border: 1.5px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--navy);
+      color: var(--navy);
+    }
+
+    .btn-secondary:disabled,
+    .btn-primary:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    .btn-submit {
+      background: var(--navy);
+      color: #fff;
+    }
+
+    .btn-submit:hover {
+      background: var(--navy-light);
+    }
+
+    .btn-ask-ai {
+      padding: 9px 18px;
+      border-radius: 8px;
+      border: 1.5px solid var(--warm-gray);
+      background: #fff;
+      color: var(--navy);
+      font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-size: .86rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-ask-ai:hover {
+      background: var(--warm-gray);
+      color: #fff;
+    }
+
+    .btn-ask-ai:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+      background: #fff;
+      color: var(--navy);
+    }
+
+    #intro {
+      max-width: 100%;
+      margin: 0 auto;
+    }
+
+    #intro h2 {
+      font-family: 'Inter', sans-serif;
+      font-size: 1.65rem;
+      font-weight: 780;
+      color: var(--navy);
+      margin-bottom: 18px;
+    }
+
+    #intro p {
+      color: var(--text-light);
+      line-height: 1.75;
+      margin-bottom: 14px;
+      font-size: 1rem;
+    }
+
+    .consent-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      box-shadow: 0 12px 34px rgba(0, 50, 98, .075);
+      padding: 36px 40px;
+      margin: 28px 0;
+    }
+
+    .consent-box p {
+      font-size: .87rem;
+      color: var(--text-light);
+      margin-bottom: 10px;
+      line-height: 1.65;
+    }
+
+    .consent-box p:last-of-type {
+      margin-bottom: 0;
+    }
+
+    .consent-box strong {
+      color: var(--text);
+    }
+
+    .consent-check {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-top: 18px;
+      cursor: pointer;
+    }
+
+    .consent-check input {
+      display: none;
+    }
+
+    .check-box {
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+      border: 2px solid var(--border);
+      flex-shrink: 0;
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .15s;
+    }
+
+    .check-box.checked {
+      background: var(--warm-gray);
+      border-color: var(--warm-gray);
+    }
+
+    .check-box.checked::after {
+      content: '✓';
+      color: #fff;
+      font-size: 12px;
+    }
+
+    .consent-check span {
+      font-size: .9rem;
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .divider {
+      width: 46px;
+      height: 2px;
+      background: var(--terra);
+      margin: 22px auto;
+    }
+
+    .error-hint {
+      color: var(--danger);
+      font-size: .84rem;
+      margin-top: 6px;
+      display: none;
+    }
+
+    .input-error {
+      border-color: var(--danger) !important;
+      background: #fdf4f4 !important;
+    }
+
+    .group-error {
+      outline: 1.5px solid var(--danger);
+      border-radius: 10px;
+    }
+
+    .page.study-page {
+      max-width: none;
+      width: min(1600px, calc(100vw - 24px));
+      padding: 12px 12px 28px;
+    }
+
+    .study-grid {
+      display: grid;
+      grid-template-columns: minmax(760px, 1.85fr) minmax(460px, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    @media (max-width:1180px) {
+      .page.study-page {
+        width: min(100%, calc(100vw - 12px));
+        padding: 10px 8px 28px;
+      }
+
+      .study-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .paper-pane {
+      background: #eef2f6;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 10px 28px rgba(0, 50, 98, .075);
+      padding: 6px;
+      height: calc(100vh - 130px);
+      min-height: 680px;
+      overflow: auto;
+      position: sticky;
+      top: 16px;
+    }
+
+    .pdf-render-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .pdf-render-wrap canvas {
+      width: 100%;
+      height: auto;
+      max-width: 100%;
+      background: #fff;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, .16);
+      border-radius: 4px;
+      display: block;
+    }
+
+    .pdf-render-wrap .pdf-status-msg {
+      color: var(--text-light);
+      font-size: .95rem;
+      padding: 24px 12px;
+      text-align: center;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .pdf-zoom-note {
+      color: var(--text-light);
+      font-size: .78rem;
+      font-style: italic;
+      text-align: center;
+      padding: 6px 4px 0;
+    }
+
+    /* Right-hand workspace: heading + tabs on top, then a single tall region
+   (Questions or AI Assistant) that scrolls independently from the paper. */
+    .workspace-pane {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 130px);
+      min-height: 680px;
+      position: sticky;
+      top: 16px;
+    }
+
+    .workspace-head {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .study-heading {
+      margin: 0;
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--navy);
+      letter-spacing: -0.02em;
+    }
+
+    .workspace-tabs {
+      display: flex;
+      gap: 4px;
+      background: #eef2f6;
+      border-radius: 10px;
+      padding: 4px;
+    }
+
+    .tab-btn {
+      border: none;
+      background: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: .88rem;
+      font-family: inherit;
+      color: var(--text-light);
+      cursor: pointer;
+      transition: all .15s;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .tab-btn.active {
+      background: var(--navy);
+      color: #fff;
+      box-shadow: 0 2px 6px rgba(0, 50, 98, .12);
+    }
+
+    /* AI tab gets a light tint + icon so it reads as "available", not identical
+   to a plain inactive tab — otherwise participants can miss it entirely. */
+    .tab-btn[data-tab="ai"]:not(.active) {
+      background: #f3f7fb;
+      border: 1px solid #d7e0ea;
+    }
+
+    .tab-btn[data-tab="ai"]::before {
+      content: '✦';
+      margin-right: 6px;
+      color: var(--warm-gray);
+      font-size: .8em;
+    }
+
+    @keyframes tabPulse {
+
+      0%,
+      100% {
+        box-shadow: inset 0 -3px 0 var(--warm-gray);
+      }
+
+      50% {
+        box-shadow: inset 0 -3px 0 var(--terra);
+      }
+    }
+
+    .tab-btn.attention {
+      animation: tabPulse 1.4s ease-in-out 3;
+    }
+
+    .tab-btn .tab-badge {
+      margin-left: 7px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: var(--navy);
+      color: #fff;
+      font-size: .7rem;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .instructions-mockup {
+      margin-top: 18px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      background: #f9fbfd;
+    }
+
+    .instructions-mockup svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      max-width: 560px;
+      margin: 0 auto;
+    }
+
+    .instructions-mockup .mockup-note {
+      margin: 14px auto;
+      max-width: 560px;
+      text-align: center;
+      font-size: .85rem;
+      font-weight: 600;
+      color: var(--navy);
+      background: var(--accent-soft);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 14px;
+    }
+
+    .instructions-mockup .mockup-block+.mockup-block {
+      margin-top: 18px;
+    }
+
+    .instructions-title {
+      font-family: 'Inter', sans-serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--navy);
+      margin-bottom: 16px;
+    }
+
+    .instructions-bullets {
+      margin: 0 0 14px;
+      padding-left: 22px;
+    }
+
+    .instructions-bullets li {
+      margin-bottom: 8px;
+      font-size: 0.93rem;
+      font-weight: 400;
+      line-height: 1.65;
+    }
+
+    /* Quiz transition pages (buildQuizPages() in researcher_ai_survey.js) — a
+   brief, centered "You will next answer questions about: <title>" screen
+   shown between the two papers' quiz blocks. More specific than the shared
+   ".page.active{display:block}" rule, so it wins on specificity. */
+    .page.quiz-transition-page.active {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 55vh;
+      text-align: center;
+    }
+
+    .quiz-transition-inner {
+      max-width: 640px;
+    }
+
+    .quiz-transition-lead {
+      font-size: 1.05rem;
+      color: var(--text-light);
+      margin-bottom: 14px;
+    }
+
+    .quiz-transition-title {
+      font-size: 1.55rem;
+      font-weight: 700;
+      color: var(--navy);
+      line-height: 1.4;
+    }
+
+    .tab-content {
+      display: none;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .tab-content.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .questions-pane {
+      height: 100%;
+      overflow-y: auto;
+      padding: 0 4px 16px 0;
+    }
+
+    .questions-pane .q-card {
+      padding: 22px 22px;
+    }
+
+    .questions-pane textarea {
+      min-height: 160px;
+    }
+
+    @media (max-width:1180px) {
+      .paper-pane {
+        height: auto;
+        min-height: unset;
+        max-height: 80vh;
+        overflow-y: auto;
+        position: static;
+      }
+
+      .workspace-pane {
+        height: auto;
+        min-height: unset;
+        position: static;
+      }
+
+      .tab-content.active {
+        max-height: 80vh;
+      }
+
+      .questions-pane {
+        max-height: 80vh;
+      }
+    }
+
+    /* AI Assistant — integrated workspace tab (replaces the old floating
+   support-style chat bubble) so it reads as a built-in panel, not a
+   customer-service widget. */
+    .ai-chat-pane {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .ai-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: .92rem;
+    }
+
+    .ai-msg {
+      max-width: 85%;
+      padding: 10px 13px;
+      border-radius: 10px;
+      font-size: .9rem;
+      font-weight: 400;
+      line-height: 1.55;
+    }
+
+    .ai-msg-role {
+      display: block;
+      font-size: .72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      opacity: .65;
+      margin-bottom: 3px;
+    }
+
+    .ai-msg.user {
+      align-self: flex-end;
+      background: var(--navy);
+      color: #fff;
+    }
+
+    .ai-msg.assistant {
+      align-self: flex-start;
+      background: var(--accent-soft);
+      color: var(--navy-light);
+    }
+
+    .ai-msg-content {
+      font-size: inherit;
+      font-weight: 400;
+      line-height: inherit;
+    }
+
+    .ai-msg-content p,
+    .ai-msg-content li {
+      font-size: inherit;
+      font-weight: 400;
+      line-height: inherit;
+    }
+
+    .ai-msg-content p {
+      margin: 0 0 10px;
+    }
+
+    .ai-msg-content p:last-child {
+      margin-bottom: 0;
+    }
+
+    .ai-msg-content h1,
+    .ai-msg-content h2,
+    .ai-msg-content h3,
+    .ai-msg-content h4 {
+      margin: 10px 0 6px;
+      font-family: inherit;
+      font-size: .9rem;
+      font-weight: 700;
+      line-height: 1.45;
+      color: inherit;
+    }
+
+    .ai-msg-content h1:first-child,
+    .ai-msg-content h2:first-child,
+    .ai-msg-content h3:first-child,
+    .ai-msg-content h4:first-child {
+      margin-top: 0;
+    }
+
+    .ai-msg-content ul,
+    .ai-msg-content ol {
+      margin: 6px 0 8px;
+      padding-left: 20px;
+    }
+
+    .ai-msg-content li {
+      margin-bottom: 5px;
+      font-size: inherit;
+      line-height: inherit;
+    }
+
+    .ai-msg-content strong {
+      font-weight: 700;
+    }
+
+    .ai-msg-content br {
+      content: '';
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .ai-msg.system-note {
+      align-self: center;
+      background: none;
+      color: var(--warm-gray);
+      font-size: .78rem;
+      font-style: italic;
+    }
+
+    .ai-msg.thinking {
+      align-self: flex-start;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      width: fit-content;
+      min-width: 54px;
+      background: #f1f5f9;
+      border: 1px solid #e0e7ef;
+      color: #53657a;
+    }
+
+    .thinking-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: .35;
+      animation: thinking-bounce 1.2s infinite ease-in-out;
+    }
+
+    .thinking-dot:nth-child(2) {
+      animation-delay: .15s;
+    }
+
+    .thinking-dot:nth-child(3) {
+      animation-delay: .3s;
+    }
+
+    @keyframes thinking-bounce {
+
+      0%,
+      60%,
+      100% {
+        transform: translateY(0);
+        opacity: .35;
+      }
+
+      30% {
+        transform: translateY(-4px);
+        opacity: .9;
+      }
+    }
+
+    .ai-input-row button:disabled,
+    .ai-input-row textarea:disabled {
+      cursor: not-allowed;
+      opacity: .65;
+    }
+
+    .ai-input-row {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .ai-input-row textarea {
+      min-height: 44px;
+      max-height: 120px;
+      flex: 1;
+      font-size: .92rem;
+    }
+
+    .warn-banner {
+      position: fixed;
+      top: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #fdf2e3;
+      border: 1.5px solid var(--warn);
+      color: #7a5400;
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: .87rem;
+      z-index: 200;
+      display: none;
+      max-width: 520px;
+      text-align: center;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    body.condition-noai .ai-only {
+      display: none !important;
+    }
+
+    /* In the No-AI condition, make the Questions tab span the full workspace width */
+    body.condition-noai .workspace-head {
+      width: 100%;
+    }
+
+    body.condition-noai .workspace-tabs {
+      width: 100%;
+    }
+
+    body.condition-noai .tab-btn[data-tab="questions"] {
+      width: 100%;
+      flex: 1;
+      justify-content: center;
+    }
+
+    body.condition-ai .noai-only {
+      display: none !important;
+    }
+
+    .admin-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(20, 25, 30, .92);
+      z-index: 500;
+      display: none;
+      overflow-y: auto;
+      padding: 40px 24px;
+    }
+
+    .admin-overlay.open {
+      display: block;
+    }
+
+    .admin-box {
+      max-width: 760px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 14px;
+      padding: 26px 30px;
+    }
+
+    .admin-box pre {
+      background: #f5f7fa;
+      padding: 12px;
+      border-radius: 10px;
+      max-height: 300px;
+      overflow: auto;
+      font-size: .78rem;
+    }
+
+    /* Browsers will not let JS block Escape from exiting the Fullscreen API —
+   that exit gesture is spec-enforced and cannot be prevented. The closest
+   practical equivalent is to immediately block all further interaction
+   with the task behind a full-screen overlay the moment fullscreen is
+   lost, and require a click (a fresh user gesture) to re-enter before the
+   participant can keep going. */
+    .fullscreen-required-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 31, 63, .96);
+      z-index: 600;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 40px;
+    }
+
+    .fullscreen-required-overlay.open {
+      display: flex;
+    }
+
+    .fullscreen-required-overlay h2 {
+      color: #fff;
+      margin-bottom: 14px;
+    }
+
+    .fullscreen-required-overlay p {
+      color: #cdddee;
+      max-width: 460px;
+      margin-bottom: 26px;
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+
+    .fullscreen-required-overlay .btn-primary {
+      background: var(--terra);
+      color: var(--navy-light);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+    }
+
+    .fullscreen-required-overlay .btn-primary:hover {
+      background: var(--terra-light);
+    }
+
+    .exit-screen {
+      max-width: 640px;
+      margin: 120px auto;
+      text-align: center;
+      padding: 0 24px;
+    }
+
+    .exit-screen p {
+      color: var(--text-light);
+      font-size: 1.05rem;
+      line-height: 1.75;
+    }
+
+    /* ============================================================
+   Compact general-survey layout
+   Reproduces approximately the appearance of the original
+   interface at 75% browser zoom while the browser remains at 100%.
+
+   This is intentionally scoped to .survey-page.
+   It does not affect study task pages or quiz pages.
+   ============================================================ */
+
+    .page.survey-page {
+      width: calc(100% - 48px);
+      max-width: 690px;
+      margin-left: auto;
+      margin-right: auto;
+      padding: 48px 24px 28px;
+    }
+
+    /* Consent-page header only */
+    .site-header {
+      padding: 17px 24px 15px;
+    }
+
+    .site-header h1 {
+      font-size: 1.725rem;
+      /* 75% of 2.3rem */
+    }
+
+    /* General headings and text */
+    .survey-page h1 {
+      font-size: 1.575rem;
+    }
+
+    .survey-page h2 {
+      font-size: 1.24rem;
+    }
+
+    .survey-page h3 {
+      font-size: 0.95rem;
+    }
+
+    .survey-page p {
+      font-size: 0.93rem;
+      line-height: 1.65;
+    }
+
+    .survey-page .muted {
+      font-size: 0.9rem;
+      line-height: 1.65;
+    }
+
+    .survey-page .section-title {
+      font-size: 1.05rem;
+    }
+
+    .survey-page .section-number {
+      width: 24px;
+      height: 24px;
+      font-size: 0.7rem;
+    }
+
+    .survey-page .section-label {
+      gap: 10px;
+      padding: 6px 0 18px;
+    }
+
+    /* Cards */
+    .survey-page .q-card {
+      padding: 27px 30px;
+      margin-bottom: 21px;
+      border-radius: 15px;
+    }
+
+    .survey-page .q-card.intro-card {
+      padding: 27px 30px;
+    }
+
+    .survey-page .consent-box {
+      padding: 27px 30px;
+      margin: 21px 0;
+      border-radius: 15px;
+    }
+
+    /* Explicit consent-intro overrides because #intro is more specific */
+    .survey-page #intro h2 {
+      font-size: 1.24rem;
+      margin-bottom: 14px;
+    }
+
+    .survey-page #intro p {
+      font-size: 0.9rem;
+      line-height: 1.65;
+      margin-bottom: 11px;
+    }
+
+    /* Questions and options */
+    .survey-page .q-label {
+      font-size: 0.95rem;
+      line-height: 1.5;
+      margin-bottom: 14px;
+    }
+
+    .survey-page .q-sublabel {
+      font-size: 0.8rem;
+      margin-bottom: 10px;
+    }
+
+    .survey-page .input-label {
+      font-size: 0.8rem;
+    }
+
+    .survey-page .option-item {
+      gap: 11px;
+      padding: 14px 15px;
+      min-height: 44px;
+      border-radius: 11px;
+    }
+
+    .survey-page .option-text {
+      font-size: 0.9rem;
+    }
+
+    .survey-page .option-dot {
+      width: 15px;
+      height: 15px;
+    }
+
+    /* Inputs */
+    .survey-page input[type="text"],
+    .survey-page input[type="number"],
+    .survey-page select {
+      padding: 12px 14px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+    }
+
+    .survey-page textarea {
+      padding: 12px 14px;
+      min-height: 112px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+    }
+
+    /* Scales and sliders */
+    .survey-page .likert-item {
+      margin-bottom: 17px;
+      padding-bottom: 17px;
+    }
+
+    .survey-page .likert-statement {
+      font-size: 0.87rem;
+      margin-bottom: 9px;
+    }
+
+    .survey-page .likert-btn {
+      min-height: 32px;
+      font-size: 0.76rem;
+    }
+
+    .survey-page .slider-block {
+      margin-bottom: 22px;
+      padding-bottom: 22px;
+    }
+
+    .survey-page .slider-q {
+      font-size: 0.84rem;
+      margin-bottom: 10px;
+    }
+
+    .survey-page .slider-end {
+      font-size: 0.74rem;
+    }
+
+    .survey-page .conf-label {
+      font-size: 0.82rem;
+    }
+
+    /* Consent controls */
+    .survey-page .consent-box p {
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+
+    .survey-page .consent-check span {
+      font-size: 0.84rem;
+    }
+
+    .survey-page .check-box {
+      width: 17px;
+      height: 17px;
+    }
+
+    /* Responsive safety */
+    @media (max-width: 760px) {
+      .page.survey-page {
+        width: calc(100% - 24px);
+        padding-left: 0;
+        padding-right: 0;
+      }
+
+      .survey-page .q-card,
+      .survey-page .q-card.intro-card,
+      .survey-page .consent-box {
+        padding-left: 20px;
+        padding-right: 20px;
+      }
+
+      .site-header h1 {
+        font-size: 1.45rem;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="progress-track">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
+  <div class="top-meta" id="topMeta"></div>
+  <div class="warn-banner" id="warnBanner"></div>
+
+  <div class="site-header" id="siteHeader">
+    <h1>How Researchers Read and Evaluate Papers</h1>
+  </div>
+
+  <!-- ============ 0. CONSENT ============ -->
+  <div class="page survey-page active" id="page-consent">
+    <div id="intro">
+      <div class="q-card intro-card">
+        <h2>Before we begin</h2>
+        <p class="muted">This is a study about how researchers and research trainees evaluate scientific claims and
+          reason about evidence. The study also includes questions about AI assistants, meaning conversational tools
+          such as ChatGPT, Claude, Gemini, Copilot, and similar products that you can ask questions or give tasks to in
+          plain language.</p>
+        <p class="muted" style="margin-top:10px;">The study takes approximately 30-45 minutes.</p>
+      </div>
+
+      <div class="q-card secondary">
+        <label class="input-label" style="font-size:.9rem;font-weight:600;color:var(--text);">Prolific ID</label>
+        <input type="text" id="prolific_id" placeholder="Enter your Prolific ID" required style="margin-top:8px;">
+        <div class="error-hint" id="prolificErrorHint">Required to proceed.</div>
+      </div>
+
+      <div class="q-card secondary">
+        <div class="q-label">Have you heard of and used at least one of the AI assistants described above?</div>
+        <div class="options-grid" id="rg-familiar"></div>
+      </div>
+
+      <div class="consent-box">
+        <p style="font-size:.95rem;color:var(--navy);font-weight:500;margin-bottom:16px;">Consent Form</p>
+
+        <p><strong>Purpose of the study.</strong> This study is being conducted by Alison Gopnik, professor of
+          psychology at the University of California, Berkeley, and her laboratory of research assistants, graduate
+          students, and postdoctoral fellows. We invite you to participate in a study about how researchers and research
+          trainees read, understand, and evaluate scientific papers. Participation is entirely voluntary.</p>
+
+        <p><strong>Study procedures.</strong> There will be one testing session lasting approximately 45-60 minutes. You
+          will first complete questions about your background, your usual approach to research work, and your experience
+          with AI assistants. You will then read and evaluate two short research studies. Some participants will be
+          provided with access to an AI assistant while completing the paper evaluation task. If you are provided with
+          access to an AI assistant, your interactions with it will be recorded as part of the study data.</p>
+
+        <p>Some questions will ask for your interpretations, evaluations, or opinions. There are no right or wrong
+          answers to those questions. Please answer based on your own understanding and judgment. You may refrain from
+          answering any question that makes you uncomfortable and may withdraw from the study at any time without
+          penalty.</p>
+
+        <p><strong>Benefits.</strong> There is no direct benefit to you, but you may find the task interesting. You will
+          also contribute to improving our understanding of how people evaluate research materials.</p>
+
+        <p><strong>Risks and discomforts.</strong> We do not expect you to face any foreseeable risks beyond those
+          ordinarily encountered when completing an online survey. There is a small possibility that confidentiality
+          could be compromised; however, we have taken measures to minimize this risk.</p>
+
+        <p><strong>Confidentiality.</strong> Your identity will be separated from your research data, and a numerical
+          code will be used to organize the data. Your confidentiality will be protected to the degree permitted by the
+          technology being used. No guarantees can be made regarding the interception of data sent over the Internet by
+          third parties.</p>
+
+        <p><strong>Data storage and future use.</strong> Data will be stored securely at the University in encrypted
+          format and may be retained indefinitely. Only authorized laboratory personnel will have access to identifiable
+          study records. No individual will be identified in a presentation or publication. After identifiers are
+          removed, the de-identified information may be used for future research or shared with other investigators
+          without additional consent.</p>
+
+        <p><strong>Compensation.</strong> You will receive compensation as described in the study listing. The study
+          includes checks intended to determine whether participants are completing the tasks honestly and carefully. As
+          long as you read the instructions and make a good-faith effort to complete the study, your submission will be
+          approved. Submissions may be rejected if there is clear evidence that the study was not completed as
+          instructed.</p>
+
+        <p><strong>Rights.</strong> Your participation is voluntary. You may withdraw your consent and discontinue
+          participation at any time. Whether or not you participate will have no bearing on your status with respect to
+          any University of California program, department, or service.</p>
+
+        <p><strong>Questions.</strong> For questions about the study, contact the research team. For questions about
+          your rights as a research participant, contact the Committee for the Protection of Human Subjects at the
+          University of California, Berkeley at (510) 642-7461 or subjects@berkeley.edu.</p>
+
+        <p style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+          <strong>Contact information.</strong><br>
+          Principal Investigator: Alison Gopnik, gopnik@berkeley.edu<br>
+          Study contact: ey242@berkeley.edu<br>
+          Laboratory Manager: gopniklabmanager@berkeley.edu
+        </p>
+
+        <label class="consent-check" onclick="toggleConsent('consent-cb','consent-visual')">
+          <input type="checkbox" id="consent-cb">
+          <div class="check-box" id="consent-visual"></div>
+          <span>By selecting this box, I acknowledge that I am 18 or older, have read this consent form, and agree to
+            take part in the research.</span>
+        </label>
+      </div>
+
+      <div class="consent-box">
+        <p style="font-size:.95rem;color:var(--navy);font-weight:500;margin-bottom:16px;">Research Media Records Release
+        </p>
+        <p>As part of this project, anonymized responses may be used to create aggregate visualizations published on a
+          public research website to demonstrate the study's findings. No individual response will be identifiable, and
+          your name will not be associated with any published output.</p>
+        <label class="consent-check" onclick="toggleConsent('media-cb','media-visual')">
+          <input type="checkbox" id="media-cb">
+          <div class="check-box" id="media-visual"></div>
+          <span>By selecting this box, I consent to my anonymized responses being included in aggregate visualizations
+            on a public research website.</span>
+        </label>
+      </div>
+
+      <div id="consent-error" class="error-hint">Please answer all questions and check both boxes above to continue.
+      </div>
+
+      <div style="margin-top:20px;display:flex;gap:12px;align-items:center;">
+        <button class="btn btn-primary" onclick="submitConsentPage()">Begin study</button>
+        <button class="btn btn-secondary" onclick="declineConsent()">Decline</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ EXIT SCREEN (decline / not familiar with AI) ============ -->
+  <div class="page survey-page" id="page-exit">
+    <div class="exit-screen">
+      <h2>Thank you for your interest.</h2>
+      <p>You have chosen not to participate in this study, or you indicated that you are not familiar with AI
+        assistants. No action is required on your part. We appreciate you taking the time to read this information.</p>
+    </div>
+  </div>
+
+  <!-- ============ 1. ABOUT YOU ============ -->
+  <div class="page survey-page" id="page-about-you">
+    <div class="section-label">
+      <div class="section-number" id="secnum-about-you">1</div>
+      <div class="section-title">About You</div>
+    </div>
+    <div class="q-card">
+      <div class="q-label">Age</div><input type="number" id="ay_age" min="16" max="100">
+    </div>
+    <div class="q-card">
+      <div class="q-label">What is your first language?</div>
+      <div class="options-grid" id="rg-ay-lang"></div>
+    </div>
+    <div class="q-card">
+      <div class="q-label">Which option best describes your current research role?</div>
+      <div class="options-grid" id="rg-ay-role"></div>
+    </div>
+    <div class="q-card">
+      <div class="q-label">What is your field or area of research?</div><input type="text" id="ay_field"
+        placeholder="Describe in your own words">
+    </div>
+    <div class="q-card">
+      <div class="q-label">Approximately how many papers have you formally reviewed for a journal, conference, workshop,
+        or similar scholarly venue?</div>
+      <div class="options-grid" id="rg-ay-reviewed"></div>
+    </div>
+  </div>
+
+  <!-- ============ 2. HOW YOU APPROACH RESEARCH WORK (SRL) ============ -->
+  <div class="page survey-page" id="page-srl">
+    <div class="section-label">
+      <div class="section-number" id="secnum-srl">2</div>
+      <div class="section-title">How You Approach Research Work</div>
+    </div>
+    <p class="muted" style="margin-bottom:16px;">Please indicate how well each statement describes the way you typically
+      approach scholarly work related to research. Answer based on how you usually behave, not how you think you should
+      behave. There are no right or wrong answers.</p>
+    <div class="q-card" id="srlWrap"></div>
+  </div>
+
+  <!-- ============ CRITICAL-THINKING SCALE (shared template, placed pre or post) ============ -->
+  <div class="page survey-page" id="page-ct">
+    <div class="section-label">
+      <div class="section-number" id="secnum-ct">3</div>
+      <div class="section-title">How You Evaluate Research Claims</div>
+    </div>
+    <div id="ctIntroText"></div>
+    <div class="q-card" id="ctWrap"></div>
+  </div>
+
+  <!-- ============ 4. EXPERIENCE WITH AI ASSISTANTS IN RESEARCH ============ -->
+  <div class="page survey-page" id="page-ai-experience">
+    <div class="section-label">
+      <div class="section-number" id="secnum-ai-experience">4</div>
+      <div class="section-title">Experience with AI Assistants in Research</div>
+    </div>
+    <div class="q-card">
+      <div class="q-label">For which research-related purposes do you use AI assistants? Select all that apply.</div>
+      <div class="options-grid" id="rg-ai-purpose"></div>
+    </div>
+    <div class="q-card">
+      <div class="q-label">How long have you been using AI assistants for research regularly?</div>
+      <div class="options-grid" id="rg-ai-tenure"></div>
+    </div>
+    <div class="q-card">
+      <div class="q-label">On average, approximately how many hours per week do you use AI assistants for research work?
+      </div>
+      <div class="q-sublabel">Round to the nearest half hour</div>
+      <input type="number" step="0.5" min="0" id="ai_hours_per_week">
+    </div>
+    <div class="q-card">
+      <div class="q-label">How would you describe your understanding of how AI assistants work?</div>
+      <div class="options-grid" id="rg-ai-understanding"></div>
+    </div>
+  </div>
+
+  <!-- ============ 5. TASK INSTRUCTIONS ============ -->
+  <div class="page survey-page" id="page-instructions">
+    <div class="section-label">
+      <div class="section-number" id="secnum-task">5</div>
+      <div class="section-title">Task</div>
+    </div>
+    <div class="q-card">
+      <div id="instructionsText"></div>
+      <div id="instructionsMockup" class="instructions-mockup"></div>
+    </div>
+  </div>
+
+  <!-- ============ STUDY SLOTS (filled dynamically; participants see 2 of the 3 pool papers) ============ -->
+  <div class="page study-page" id="page-study-1"></div>
+  <div class="page study-page" id="page-study-2"></div>
+
+  <!-- ============ 6. FINAL REFLECTIONS ============ -->
+  <div class="page survey-page" id="page-reflections">
+    <div class="section-label">
+      <div class="section-number" id="secnum-reflections">6</div>
+      <div class="section-title">Reflections</div>
+    </div>
+    <div class="q-card">
+      <div class="q-label">How confident are you in your responses for each study?</div>
+      <div id="confWrap"></div>
+    </div>
+    <div class="q-card">
+      <div class="q-label">How well do you feel you understood each study?</div>
+      <div id="understandWrap"></div>
+    </div>
+    <div class="ai-only" id="perPaperAiReflectionsWrap"></div>
+  </div>
+
+  <!-- ============ QUIZ TRANSITION ============ -->
+  <div class="page" id="page-quiz-intro">
+    <div class="section-label">
+      <div class="section-number" id="secnum-quiz">7</div>
+      <div class="section-title">Comprehension Quiz</div>
+    </div>
+    <div class="q-card">
+      <p>We will now ask a few short questions to check your understanding of the studies you read.</p>
+      <p><strong>Please answer based on the information presented in the papers and do not use any tools to complete the
+          quiz. You will not be able to return to the papers.</strong></p>
+    </div>
+  </div>
+
+  <!-- ============ QUIZ PAGES (built dynamically, one question per page) ============ -->
+  <div id="quizPagesContainer"></div>
+
+  <!-- ============ 9. DEBRIEF ============ -->
+  <div class="page survey-page" id="page-debrief">
+    <div class="section-label">
+      <div class="section-number" id="secnum-debrief">8</div>
+      <div class="section-title">Debrief</div>
+    </div>
+    <div class="q-card">
+      <p>The purpose of this study is to understand how people evaluate research claims, reason about evidence, and, for
+        some participants, with or without AI tools during scientific reasoning tasks. To study these processes fairly,
+        we did not want participants' responses to depend on prior knowledge of a real topic, article, or research area.
+        For that reason, the research articles you read were artificially constructed for this study and were not real
+        published research papers. The findings, statistics, citations, and implications in the articles were included
+        as part of the study materials and should not be treated as established scientific evidence or as advice for
+        real-world decisions.</p>
+      <p style="margin-top:16px;"><strong>Thank you very much for participating!</strong></p>
+    </div>
+    <div class="divider"></div>
+  </div>
+
+  <!-- ============ SUBMISSION CONFIRMATION ============ -->
+  <div class="page survey-page" id="page-submitted">
+    <div class="exit-screen">
+      <h2>Your response has been submitted.</h2>
+      <p>Thank you very much for participating!</p>
+    </div>
+  </div>
+
+  <!-- ============ NAV (Back button intentionally omitted — navigation is forward-only) ============ -->
+  <div class="nav-bar">
+    <span class="nav-label" id="navStep"></span>
+    <span class="assignment-status" id="assignmentStatus">
+      <span class="assignment-spinner" id="assignmentSpinner"></span>
+      <span id="assignmentStatusText"></span>
+      <button type="button" class="assignment-retry-btn" id="assignmentRetryBtn" style="display:none;" onclick="retryAssignment()">Retry</button>
+    </span>
+    <!-- Reuses the .assignment-status / .assignment-spinner / .assignment-retry-btn
+         classes verbatim (no new CSS) for the analogous final-submission
+         loading/retry state. Hidden by default; shown only while/if
+         finalizeSubmission() is running or has failed. -->
+    <span class="assignment-status" id="submissionStatus">
+      <span class="assignment-spinner" id="submissionSpinner"></span>
+      <span id="submissionStatusText"></span>
+      <button type="button" class="assignment-retry-btn" id="submissionRetryBtn" style="display:none;" onclick="retrySubmission()">Retry</button>
+    </span>
+    <button class="btn btn-primary" id="btnNext" onclick="navigate(1)">Continue &rarr;</button>
+  </div>
+
+
+  <!-- ============ FULLSCREEN-REQUIRED OVERLAY ============ -->
+  <div class="fullscreen-required-overlay" id="fsRequiredOverlay">
+    <h2>Fullscreen Required</h2>
+    <p>This task needs to be completed in fullscreen mode. Please click below to continue.</p>
+    <button class="btn btn-primary" onclick="enterFullscreenAndStart()">Return to Fullscreen &rarr;</button>
+  </div>
+
+  <!-- ============ HIDDEN ADMIN EXPORT OVERLAY ============ -->
+  <div class="admin-overlay" id="adminOverlay">
+    <div class="admin-box">
+      <h2 style="margin-top:0;">Researcher Export (hidden panel — dev tool only)</h2>
+      <p class="muted">This panel is not part of the participant flow. Press Ctrl+Shift+E or add ?admin=1 to the URL to
+        reach it.</p>
+      <p class="muted">
+        <strong>Current Session</strong> exports below only contain this one browser tab's in-memory data — useful for
+        a quick local check while developing. They are <em>not</em> the accumulated export. To download every stored
+        participant/test submission from the backend (the file to actually hand off for analysis), use
+        <a href="/admin/export" target="_blank" rel="noopener">/admin/export</a> instead, which reads all accumulated
+        records from backend storage and requires the admin export key.
+      </p>
+
+      <!-- ===================== TEST MODE (DEV/QA ONLY) — Data Audit Summary ===================== -->
+      <h3>Data Audit Summary</h3>
+      <pre id="adminAuditSummary" style="max-height:260px;overflow:auto;"></pre>
+
+      <div style="display:flex;gap:10px;margin:14px 0;flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="downloadJSON()">Download Current Session JSON</button>
+        <button class="btn btn-secondary" onclick="downloadCSV()">Download Current Session CSV</button>
+        <button class="btn btn-secondary" onclick="exportRawDataJson()">Export Raw DATA (JSON)</button>
+        <button class="btn btn-secondary" onclick="exportAuditSummaryJson()">Export Audit Summary (JSON)</button>
+        <button class="btn btn-secondary" onclick="exportComparisonCsv()">Export Comparison Row (CSV)</button>
+        <button class="btn btn-secondary"
+          onclick="document.getElementById('adminOverlay').classList.remove('open')">Close</button>
+      </div>
+      <h3>Live data preview</h3>
+      <pre id="adminPreview"></pre>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+  <!-- Render AI Markdown safely -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+
+  <script src="paper_text_data.js"></script>
+  <script src="researcher_ai_survey.js"></script>
+</body>
+
+</html>
