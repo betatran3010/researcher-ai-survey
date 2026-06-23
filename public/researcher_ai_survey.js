@@ -1597,7 +1597,7 @@ function buildInstructionsPages() {
   const taskSectionNumber =
     DATA.ct_scale_placement === 'pre' ? 5 : 4;
 
-  let html = '';
+  container.innerHTML = '';
 
   pages.forEach((page, i) => {
     const pageId = 'page-instructions-' + i;
@@ -1615,10 +1615,71 @@ function buildInstructionsPages() {
       </div>
     `;
 
-    // rest of your existing code
-  });
+    const paragraphs = Array.isArray(page.paragraphs)
+      ? page.paragraphs
+      : [];
 
-  container.innerHTML = html;
+    const paraHtml = paragraphs
+      .map(text => `
+        <p style="margin-bottom:14px;">
+          ${escapeHtml(text)}
+        </p>
+      `)
+      .join('');
+
+    const bulletsHtml = Array.isArray(page.bullets)
+      ? `
+        <ul class="instructions-bullets">
+          ${page.bullets
+            .map(bullet => `<li>${escapeHtml(bullet)}</li>`)
+            .join('')}
+        </ul>
+      `
+      : '';
+
+    let mockupHtml = '';
+
+    if (page.mockup === 'ai') {
+      mockupHtml = `
+        <div class="instructions-mockup">
+          <div class="mockup-block">
+            ${INSTRUCTIONS_MOCKUP_SVG_QUESTIONS}
+          </div>
+
+          <p class="mockup-note">
+            ${escapeHtml(INSTRUCTIONS_MOCKUP_NOTE)}
+          </p>
+
+          <div class="mockup-block">
+            ${INSTRUCTIONS_MOCKUP_SVG_AI}
+          </div>
+        </div>
+      `;
+    } else if (page.mockup === 'noai') {
+      mockupHtml = `
+        <div class="instructions-mockup">
+          <div class="mockup-block">
+            ${INSTRUCTIONS_MOCKUP_SVG_NOAI}
+          </div>
+        </div>
+      `;
+    }
+
+    container.insertAdjacentHTML(
+      'beforeend',
+      `
+        <div class="page survey-page" id="${pageId}">
+          ${headerHtml}
+
+          <div class="q-card">
+            ${paraHtml}
+            ${bulletsHtml}
+            ${mockupHtml}
+          </div>
+        </div>
+      `
+    );
+  });
 }
 
 // ---------- Study pages ----------
