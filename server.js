@@ -320,11 +320,10 @@ app.post('/api/chat', async (req, res) => {
 // not trusted from the client, and must match ROLE_OPTIONS in
 // researcher_ai_survey.js exactly.
 //
-// Per mentor (Eunice Yiu) comments on the spec doc, "PhD student" is now a
-// single option (no longer split into per-year radio options) with a
-// free-typed number of years collected separately; its stratum must be
-// derived from that number (1 year = lower, 2+ years = higher) rather than
-// looked up by label here — see deriveExpertiseStratum() below.
+// PhD students receive a conditional program-year question.
+// First-year PhD students are classified as lower expertise;
+// second-year-or-later PhD students are classified as higher expertise.
+// Conditional PhD-program-year follow-up used for expertise stratification.
 const ROLE_TIER_MAP = {
   'Undergraduate research assistant': 'lower',
   'Post-baccalaureate research assistant or lab manager': 'lower',
@@ -333,28 +332,41 @@ const ROLE_TIER_MAP = {
 };
 
 const ROLES_REQUIRING_YEARS = new Set([
-  "Master's student",
-  'PhD student',
-  'Postdoctoral scholar'
+  'PhD student'
 ]);
 
 function normalizeResearchRoleYears(research_role, rawYears) {
-  if (!ROLES_REQUIRING_YEARS.has(research_role)) return null;
-  const years = Number(rawYears);
-  return Number.isInteger(years) && years >= 1 ? years : null;
+  if (research_role !== 'PhD student') return null;
+
+  const programYear = Number(rawYears);
+
+  return Number.isInteger(programYear) && programYear >= 1
+    ? programYear
+    : null;
 }
 
 // Returns the expertise stratum ('lower' | 'higher') for a given role, or
 // null if the role/years combination is invalid or unrecognized. PhD
 // student's stratum depends on years in the program (1 = lower, 2+ = higher).
-function deriveExpertiseStratum(research_role, research_role_years) {
+function deriveExpertiseStratum(
+  research_role,
+  research_role_years
+) {
   if (research_role === 'PhD student') {
-    if (!Number.isInteger(research_role_years) || research_role_years < 1) return null;
-    return research_role_years === 1 ? 'lower' : 'higher';
+    const programYear = Number(research_role_years);
+
+    if (
+      !Number.isInteger(programYear) ||
+      programYear < 1
+    ) {
+      return null;
+    }
+
+    return programYear === 1
+      ? 'lower'
+      : 'higher';
   }
-  if (ROLES_REQUIRING_YEARS.has(research_role) && !Number.isInteger(research_role_years)) {
-    return null;
-  }
+
   return ROLE_TIER_MAP[research_role] || null;
 }
 

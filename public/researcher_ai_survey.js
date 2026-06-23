@@ -113,10 +113,19 @@ const DATA = {
 // the server's ROLE_TIER_MAP/PhD handling in server.js.
 const ROLE_OPTIONS = [
   { l: 'Undergraduate research assistant', tier: 'lower' },
-  { l: 'Post-baccalaureate research assistant or lab manager', tier: 'lower' },
-  { l: "Master's student", tier: 'lower', years: true, yearsLabel: 'Number of years in the program (rounded up to the nearest integer)' },
-  { l: 'PhD student', tier: null, years: true, yearsLabel: 'Number of years in the program (rounded up to the nearest integer)' },
-  { l: 'Postdoctoral scholar', tier: 'higher', years: true, yearsLabel: 'Number of years in the position (rounded up to the nearest integer)' }
+  {
+    l: 'Post-baccalaureate research assistant or lab manager',
+    tier: 'lower'
+  },
+  { l: "Master's student", tier: 'lower' },
+  {
+    l: 'PhD student',
+    tier: null,
+    years: true,
+    yearsLabel:
+      'What year of your PhD program are you in? (Round up to the nearest whole number.)'
+  },
+  { l: 'Postdoctoral scholar', tier: 'higher' }
 ];
 
 // Section 4, Q1 — "For which research-related purposes do you use AI
@@ -964,7 +973,13 @@ async function navigate(dir) {
     const roleVal = document.querySelector('input[name="ay_role"]:checked');
     pendingAssignmentRole = roleVal ? roleVal.value : null;
     const roleYearsEl = document.getElementById('ay_role_years');
-    pendingAssignmentRoleYears = (roleYearsEl && roleYearsEl.value !== '') ? Number(roleYearsEl.value) : null;
+
+    pendingAssignmentRoleYears =
+      pendingAssignmentRole === 'PhD student' &&
+        roleYearsEl &&
+        roleYearsEl.value !== ''
+        ? Number(roleYearsEl.value)
+        : null;
     const ok = await requestAssignmentWithUI();
     navigateInFlight = false;
     if (!ok) return;
@@ -1478,8 +1493,22 @@ function setupRoleYearsField(containerId, fieldName, options) {
     wrapEl.id = containerId + '-years-wrap';
     wrapEl.style.marginTop = '10px';
     wrapEl.style.display = 'none';
-    wrapEl.innerHTML = `<div class="q-sublabel" id="${containerId}-years-label" style="margin-bottom:6px;"></div>
-      <input type="number" id="${fieldName}_years" min="1" step="1" placeholder="Number of years">`;
+    wrapEl.innerHTML = `
+  <div
+    class="q-sublabel"
+    id="${containerId}-years-label"
+    style="margin-bottom:6px;"
+  ></div>
+
+  <input
+    type="number"
+    id="${fieldName}_years"
+    min="1"
+    step="1"
+    inputmode="numeric"
+    placeholder="Year in PhD program"
+  >
+`;
     container.insertAdjacentElement('afterend', wrapEl);
   }
   const labelEl = document.getElementById(containerId + '-years-label');

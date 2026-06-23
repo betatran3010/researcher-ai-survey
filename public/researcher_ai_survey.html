@@ -646,8 +646,13 @@
       font-weight: 600;
     }
 
-    .assignment-status.loading { color: var(--warm-gray); }
-    .assignment-status.error { color: #b3261e; }
+    .assignment-status.loading {
+      color: var(--warm-gray);
+    }
+
+    .assignment-status.error {
+      color: #b3261e;
+    }
 
     .assignment-spinner {
       width: 14px;
@@ -659,7 +664,9 @@
     }
 
     @keyframes assignment-spin {
-      to { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
 
     .assignment-retry-btn {
@@ -1843,6 +1850,18 @@
       <div class="options-grid" id="rg-ay-role"></div>
     </div>
     <div class="q-card">
+      <div class="q-label">
+        Approximately how many total years have you been involved in conducting research?
+      </div>
+
+      <input type="number" id="research_experience_years" min="1" step="1" inputmode="numeric"
+        placeholder="Number of years">
+
+      <div class="q-sublabel" style="margin-top:6px;">
+        Round up to the nearest whole number.
+      </div>
+    </div>
+    <div class="q-card">
       <div class="q-label">What is your field or area of research?</div><input type="text" id="ay_field"
         placeholder="Describe in your own words">
     </div>
@@ -1932,7 +1951,8 @@
       <div class="section-title">Comprehension Quiz</div>
     </div>
     <div class="q-card">
-      <p>We will now ask a few short questions to check what you remember from the studies you read. You will not be able
+      <p>We will now ask a few short questions to check what you remember from the studies you read. You will not be
+        able
         to return to the papers.</p>
     </div>
   </div>
@@ -1973,7 +1993,8 @@
     <span class="assignment-status" id="assignmentStatus">
       <span class="assignment-spinner" id="assignmentSpinner"></span>
       <span id="assignmentStatusText"></span>
-      <button type="button" class="assignment-retry-btn" id="assignmentRetryBtn" style="display:none;" onclick="retryAssignment()">Retry</button>
+      <button type="button" class="assignment-retry-btn" id="assignmentRetryBtn" style="display:none;"
+        onclick="retryAssignment()">Retry</button>
     </span>
     <!-- Reuses the .assignment-status / .assignment-spinner / .assignment-retry-btn
          classes verbatim (no new CSS) for the analogous final-submission
@@ -1982,7 +2003,8 @@
     <span class="assignment-status" id="submissionStatus">
       <span class="assignment-spinner" id="submissionSpinner"></span>
       <span id="submissionStatusText"></span>
-      <button type="button" class="assignment-retry-btn" id="submissionRetryBtn" style="display:none;" onclick="retrySubmission()">Retry</button>
+      <button type="button" class="assignment-retry-btn" id="submissionRetryBtn" style="display:none;"
+        onclick="retrySubmission()">Retry</button>
     </span>
     <button class="btn btn-primary" id="btnNext" onclick="navigate(1)">Continue &rarr;</button>
   </div>
