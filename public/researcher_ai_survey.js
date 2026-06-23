@@ -1572,7 +1572,6 @@ function buildInstructionsPages() {
     const headerHtml = i === 0
       ? `<div class="section-label"><div class="section-number" id="secnum-task">5</div><div class="section-title">Paper Evaluation Task</div></div>`
       : '';
-    const titleHtml = i === 0 ? `<p class="instructions-title">${escapeHtml(INSTRUCTIONS_TITLE)}</p>` : '';
     const paraHtml = page.paragraphs.map(t => `<p style="margin-bottom:14px;">${escapeHtml(t)}</p>`).join('');
     const bulletsHtml = page.bullets
       ? `<ul class="instructions-bullets">${page.bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('')}</ul>`
@@ -1593,7 +1592,6 @@ function buildInstructionsPages() {
     html += `<div class="page survey-page" id="${pageId}">
       ${headerHtml}
       <div class="q-card">
-        ${titleHtml}
         ${paraHtml}
         ${bulletsHtml}
         ${mockupHtml}
