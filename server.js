@@ -324,17 +324,32 @@ app.post('/api/chat', async (req, res) => {
 // Research-expertise stratum is derived here from the exact role string,
 // not trusted from the client, and must match ROLE_OPTIONS in
 // researcher_ai_survey.js exactly.
+//
+// Per mentor (Eunice Yiu) comments on the spec doc, "PhD student" is now a
+// single option (no longer split into per-year radio options) with a
+// free-typed number of years collected separately; its stratum must be
+// derived from that number (1 year = lower, 2+ years = higher) rather than
+// looked up by label here — see deriveExpertiseStratum() below.
 const ROLE_TIER_MAP = {
   'Undergraduate research assistant': 'lower',
   'Post-baccalaureate research assistant or lab manager': 'lower',
   "Master's student": 'lower',
-  'First-year PhD student': 'lower',
-  'Second-year PhD student': 'higher',
-  'Third-year PhD student': 'higher',
-  'Fourth-year PhD student': 'higher',
-  'Fifth-year or later PhD student': 'higher',
   'Postdoctoral scholar': 'higher'
 };
+
+// Returns the expertise stratum ('lower' | 'higher') for a given role, or
+// null if the role/years combination is invalid or unrecognized. PhD
+// student is the only role whose stratum depends on a second value
+// (years in the program); every other role maps directly via
+// ROLE_TIER_MAP.
+function deriveExpertiseStratum(research_role, research_role_years) {
+  if (research_role === 'PhD student') {
+    const years = Number(research_role_years);
+    if (!Number.isFinite(years) || years < 1) return null;
+    return years <= 1 ? 'lower' : 'higher';
+  }
+  return ROLE_TIER_MAP[research_role] || null;
+}
 
 // The four cells within each stratum. Index in this array is what hashed
 // values are mapped onto via modulo — order matters for reproducibility,
@@ -404,6 +419,7 @@ app.post('/api/assign-condition', async (req, res) => {
   try {
     const rawStableId = req.body && req.body.stable_participant_id;
     const research_role = req.body && req.body.research_role;
+    const research_role_years = req.body && req.body.research_role_years;
 
     if (!isNonEmptyString(rawStableId) || rawStableId.length > 200) {
       return res.status(400).json({ error: 'Invalid stable_participant_id.' });
@@ -412,12 +428,12 @@ app.post('/api/assign-condition', async (req, res) => {
     if (!stable_participant_id) {
       return res.status(400).json({ error: 'Invalid stable_participant_id.' });
     }
-    // Expertise stratum is derived here from the exact, server-side
-    // ROLE_TIER_MAP lookup of the submitted role string — the client never
-    // sends a stratum, and nothing here trusts one even if it did.
-    const expertise_stratum = ROLE_TIER_MAP[research_role];
+    // Expertise stratum is derived here entirely server-side (role string,
+    // plus years-in-program for PhD student) — the client never sends a
+    // stratum, and nothing here trusts one even if it did.
+    const expertise_stratum = deriveExpertiseStratum(research_role, research_role_years);
     if (!expertise_stratum) {
-      return res.status(400).json({ error: 'Invalid or unrecognized research_role.' });
+      return res.status(400).json({ error: 'Invalid or unrecognized research_role (or missing/invalid research_role_years for PhD student).' });
     }
 
     const hashed_participant_id = hashStableId(stable_participant_id);
@@ -459,6 +475,7 @@ app.post('/api/assign-condition', async (req, res) => {
       const assignmentDoc = {
         hashed_participant_id,
         research_role,
+        research_role_years: (research_role === 'PhD student') ? Number(research_role_years) : null,
         research_expertise_stratum: expertise_stratum,
         ai_condition: chosenCell.ai_condition,
         critical_thinking_placement: chosenCell.ct_placement,
@@ -492,6 +509,7 @@ app.post('/api/assign-condition', async (req, res) => {
     return res.json({
       stable_assignment_id_hash: hashed_participant_id,
       research_role: assignment.research_role,
+      research_role_years: assignment.research_role_years,
       research_expertise_stratum: assignment.research_expertise_stratum,
       ai_condition: assignment.ai_condition,
       critical_thinking_placement: assignment.critical_thinking_placement,
@@ -566,7 +584,8 @@ app.post('/api/test-assign-condition', (req, res) => {
   }
 
   const research_role = (req.body && typeof req.body.research_role === 'string') ? req.body.research_role : null;
-  const research_expertise_stratum = (research_role && ROLE_TIER_MAP[research_role]) || null;
+  const research_role_years = req.body && req.body.research_role_years;
+  const research_expertise_stratum = deriveExpertiseStratum(research_role, research_role_years);
 
   // Synthetic id: a SHA-256-shaped string (so it satisfies isSha256Hex(), the
   // same format real assignments use) but derived purely from random bytes —
@@ -580,6 +599,7 @@ app.post('/api/test-assign-condition', (req, res) => {
   return res.json({
     stable_assignment_id_hash: syntheticHash,
     research_role,
+    research_role_years: (research_role === 'PhD student' && Number.isFinite(Number(research_role_years))) ? Number(research_role_years) : null,
     research_expertise_stratum,
     ai_condition: chosenCell.ai_condition,
     critical_thinking_placement: chosenCell.ct_placement,

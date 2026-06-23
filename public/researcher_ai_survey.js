@@ -40,6 +40,7 @@ const DATA = {
   ai_condition: null,               // mirrors condition
   critical_thinking_placement: null,// mirrors ct_scale_placement
   research_role: null,              // exact selected role string, as returned by the server
+  research_role_years: null,        // PhD student only — years in program, as returned by the server
   assignment_cell: null,            // combined cell label, e.g. "AI_pre" — authoritative, server-generated
   assignment_assigned_at: null,     // server timestamp the assignment was made
   assignment_source: null,          // assignment method, e.g. "deterministic_server_hash"
@@ -92,16 +93,20 @@ const DATA = {
 };
 
 // ---------- Option constants ----------
+// Per mentor (Eunice Yiu) comments on the spec doc: Master's student and PhD
+// student each collapse to a single option (rather than per-year PhD
+// options) and prompt for a free-typed number of years in the program
+// (rounded up to the nearest integer, no cap — some people take more than
+// five years); Postdoctoral scholar prompts for years in the position. PhD
+// student's expertise tier is derived from the typed year (1 = lower,
+// 2+ = higher) rather than from the option label — see ROLE_YEARS_FIELD and
+// the server's ROLE_TIER_MAP/PhD handling in server.js.
 const ROLE_OPTIONS = [
   { l: 'Undergraduate research assistant', tier: 'lower' },
   { l: 'Post-baccalaureate research assistant or lab manager', tier: 'lower' },
-  { l: "Master's student", tier: 'lower' },
-  { l: 'First-year PhD student', tier: 'lower' },
-  { l: 'Second-year PhD student', tier: 'higher' },
-  { l: 'Third-year PhD student', tier: 'higher' },
-  { l: 'Fourth-year PhD student', tier: 'higher' },
-  { l: 'Fifth-year or later PhD student', tier: 'higher' },
-  { l: 'Postdoctoral scholar', tier: 'higher' }
+  { l: "Master's student", tier: 'lower', years: true, yearsLabel: 'Number of years in the program (rounded up to the nearest integer)' },
+  { l: 'PhD student', tier: null, years: true, yearsLabel: 'Number of years in the program (rounded up to the nearest integer)' },
+  { l: 'Postdoctoral scholar', tier: 'higher', years: true, yearsLabel: 'Number of years in the position (rounded up to the nearest integer)' }
 ];
 
 // Section 4, Q1 — "For which research-related purposes do you use AI
@@ -198,14 +203,13 @@ const CT_INTRO_POST = [
 const CT_SCALE_NOTE = '1 = Not at all true for me, 7 = Very true for me';
 
 // Spec section 6, "Standardized In-Task Questions For Each Assigned Study" —
-// this exact 5-question set is repeated verbatim for Paper 1 and Paper 2
+// this exact 4-question set is repeated verbatim for Paper 1 and Paper 2
 // (no per-paper custom wording), so the label lives here rather than per
 // paper as in the previous version.
 const STANDARD_Q_DEFS = [
-  { suffix: 'q1', type: 'textarea', label: 'What do you think are the main strengths of this study?' },
-  { suffix: 'q2', type: 'textarea', label: 'What do you think are the main limitations of this study?' },
-  { suffix: 'q3', type: 'textarea', label: 'How could the study be improved, or what should researchers investigate next?' },
-  { suffix: 'q4', type: 'textarea', label: 'What broader implications might follow from these findings beyond those stated in the paper?' },
+  { suffix: 'q1', type: 'textarea', label: 'List 3 strengths of this study.' },
+  { suffix: 'q2', type: 'textarea', label: 'List 3 limitations of this study.' },
+  { suffix: 'q3', type: 'textarea', label: 'List 3 areas of improvement or follow-up experiments.' },
   { suffix: 'convincing', type: 'scale7', label: 'How convincing do you find this paper?' }
 ];
 
@@ -592,14 +596,14 @@ function writeAssignmentCache(stableId, record) {
 // must not proceed past the About You page without a valid server-issued
 // assignment, so failures are thrown for the caller (requestAssignmentWithUI,
 // below) to surface as a recoverable error with a Retry button.
-async function assignConditionAndOrder(researchRole) {
+async function assignConditionAndOrder(researchRole, researchRoleYears) {
   // ===================== TEST MODE (DEV/QA ONLY) =====================
   // When test mode is active, route entirely to the separate, server-gated
   // /api/test-assign-condition endpoint instead of the production
   // /api/assign-condition flow below — this branch never touches the stable
   // id, the same-browser assignment cache, or any real Firestore counters.
   if (TEST_MODE_ACTIVE) {
-    return assignConditionAndOrderTestMode(researchRole);
+    return assignConditionAndOrderTestMode(researchRole, researchRoleYears);
   }
 
   const { id: stableId, source: idSource } = getStableAssignmentId();
@@ -626,7 +630,8 @@ async function assignConditionAndOrder(researchRole) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       stable_participant_id: stableId,
-      research_role: effectiveRole
+      research_role: effectiveRole,
+      research_role_years: researchRoleYears
     })
   });
   if (!resp.ok) {
@@ -645,6 +650,7 @@ async function assignConditionAndOrder(researchRole) {
   DATA.assignment_id_source = idSource;
   DATA.role_locked_to_original = roleLockedToOriginal;
   DATA.research_role = data.research_role;
+  DATA.research_role_years = data.research_role_years;
   DATA.research_expertise_stratum = data.research_expertise_stratum;
   DATA.expertise_tier = data.research_expertise_stratum; // legacy alias, kept for any export logic that still reads it
   DATA.ai_condition = data.ai_condition;
@@ -698,14 +704,15 @@ async function assignConditionAndOrder(researchRole) {
 // /api/assign-condition. Deliberately skips getStableAssignmentId(),
 // readAssignmentCache()/writeAssignmentCache(), and role-lock handling —
 // none of those production-only mechanisms should apply to a test run.
-async function assignConditionAndOrderTestMode(researchRole) {
+async function assignConditionAndOrderTestMode(researchRole, researchRoleYears) {
   const resp = await fetch('/api/test-assign-condition', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       cell: TEST_MODE_CELL,
       papers: TEST_MODE_PAPERS,
-      research_role: researchRole
+      research_role: researchRole,
+      research_role_years: researchRoleYears
     })
   });
   if (!resp.ok) {
@@ -718,6 +725,7 @@ async function assignConditionAndOrderTestMode(researchRole) {
   DATA.assignment_id_source = 'test_mode';
   DATA.role_locked_to_original = false;
   DATA.research_role = data.research_role;
+  DATA.research_role_years = data.research_role_years;
   DATA.research_expertise_stratum = data.research_expertise_stratum;
   DATA.expertise_tier = data.research_expertise_stratum;
   DATA.ai_condition = data.ai_condition;
@@ -780,13 +788,14 @@ function setAssignmentStatus(mode, message) {
 // Holds the role selected at the moment Continue was clicked, so the Retry
 // button can re-run the exact same request without re-reading the form.
 let pendingAssignmentRole = null;
+let pendingAssignmentRoleYears = null;
 
 async function requestAssignmentWithUI() {
   const btnNext = document.getElementById('btnNext');
   setAssignmentStatus('loading', 'Assigning your condition…');
   if (btnNext) btnNext.disabled = true;
   try {
-    await assignConditionAndOrder(pendingAssignmentRole);
+    await assignConditionAndOrder(pendingAssignmentRole, pendingAssignmentRoleYears);
     setAssignmentStatus('hidden');
     if (btnNext) btnNext.disabled = false;
     return true;
@@ -909,6 +918,8 @@ async function navigate(dir) {
     navigateInFlight = true;
     const roleVal = document.querySelector('input[name="ay_role"]:checked');
     pendingAssignmentRole = roleVal ? roleVal.value : null;
+    const roleYearsEl = document.getElementById('ay_role_years');
+    pendingAssignmentRoleYears = (roleYearsEl && roleYearsEl.value !== '') ? Number(roleYearsEl.value) : null;
     const ok = await requestAssignmentWithUI();
     navigateInFlight = false;
     if (!ok) return;
@@ -1317,6 +1328,7 @@ function renderAllSections() {
   renderRadioGroup('rg-ay-lang', 'lang', LANG_OPTIONS);
   setupSpecifyField('rg-ay-lang', 'lang', 'Other');
   renderRadioGroup('rg-ay-role', 'ay_role', ROLE_OPTIONS, o => o.l);
+  setupRoleYearsField('rg-ay-role', 'ay_role', ROLE_OPTIONS);
   renderRadioGroup('rg-ay-reviewed', 'reviewed', REVIEWED_OPTIONS);
 
   // SRL
@@ -1385,30 +1397,74 @@ function setupSpecifyField(containerId, fieldName, triggerLabel) {
   sync();
 }
 
+// Conditional "number of years" follow-up for the research-role question
+// (Master's student / PhD student / Postdoctoral scholar — see ROLE_OPTIONS).
+// Mirrors setupSpecifyField's show/hide pattern, but is numeric and its
+// label text changes depending on which of the three roles is selected.
+function setupRoleYearsField(containerId, fieldName, options) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  let wrapEl = document.getElementById(containerId + '-years-wrap');
+  if (!wrapEl) {
+    wrapEl = document.createElement('div');
+    wrapEl.id = containerId + '-years-wrap';
+    wrapEl.style.marginTop = '10px';
+    wrapEl.style.display = 'none';
+    wrapEl.innerHTML = `<div class="q-sublabel" id="${containerId}-years-label" style="margin-bottom:6px;"></div>
+      <input type="number" id="${fieldName}_years" min="0" step="1" placeholder="Number of years">`;
+    container.insertAdjacentElement('afterend', wrapEl);
+  }
+  const labelEl = document.getElementById(containerId + '-years-label');
+  const inputEl = document.getElementById(fieldName + '_years');
+  const sync = () => {
+    const checked = container.querySelector(`input[name="${fieldName}"]:checked`);
+    const opt = checked && options.find(o => o.l === checked.value);
+    if (opt && opt.years) {
+      wrapEl.style.display = '';
+      if (labelEl) labelEl.textContent = opt.yearsLabel || 'Number of years';
+    } else {
+      wrapEl.style.display = 'none';
+      if (inputEl) inputEl.value = '';
+      DATA.responses[fieldName + '_years'] = '';
+    }
+  };
+  container.addEventListener('change', sync);
+  sync();
+}
+
 // ---------- Instructions text ----------
 const INSTRUCTIONS_TITLE = 'Paper Evaluation Task';
 
+// Verbatim from the spec doc's "Instructions Shown to All Participants"
+// section. The researcher implementation note there asks for these to be
+// split into separate pages (one paragraph per page, with a Next click
+// between each) to encourage reading; buildInstructionsText currently
+// renders them as stacked paragraphs on a single page.
 const INSTRUCTIONS_COMMON = [
-  'You will read and evaluate two short research studies, presented one at a time. For each study, the paper will appear on the left and the response questions on the right.',
-  'The studies were artificially constructed for this research and are not real published papers. Please evaluate each study as you would evaluate a submitted research paper, using the information provided and your own scientific judgment. There are no single correct answers to the open-ended questions.',
-  'Please remain on the task page, which will be displayed in fullscreen mode. Do not open other tabs or applications or use outside tools, websites, search engines, or notes.'
+  'You will now read two short research studies, presented one at a time.',
+  'For each study, the paper will appear on the left side of the page, and the response questions will appear on the right. After reading the study, you will identify its strengths and limitations, suggest improvements or future directions, and rate how convincing you find its conclusions.',
+  'The studies in this task were artificially constructed. When reviewing each study, please apply the same analytical and scientific reasoning and judgment that you would use when assessing real research.',
+  'Please complete the task without using any outside tools or resources. Your activity will be recorded, and the task will be displayed in fullscreen mode to help you stay focused.'
 ];
 
-// AI-condition-only block: one intro paragraph followed by a bullet list
-// (rendered as <ul><li> by buildInstructionsText, not plain <p> paragraphs
-// like INSTRUCTIONS_COMMON/INSTRUCTIONS_NOAI_ONLY).
+// Verbatim from the spec doc's "Additional Instructions: AI Condition
+// Only" section. AI-condition-only block: one intro paragraph followed by
+// a bullet list (rendered as <ul><li> by buildInstructionsText, not plain
+// <p> paragraphs like INSTRUCTIONS_COMMON/INSTRUCTIONS_NOAI_ONLY).
 const INSTRUCTIONS_AI_ONLY = {
-  intro: 'You will have access to an AI assistant while evaluating each study.',
+  intro: 'You will have access to an AI assistant (ChatGPT) during the paper evaluation task.',
   bullets: [
-    'Use the Questions and AI Assistant tabs to switch between writing your responses and consulting the assistant.',
-    'The assistant will already have access to the study currently displayed.',
-    'You may send up to five messages for each study. The number remaining will be shown in the AI Assistant tab. You will receive the same compensation regardless of how much you use the AI assistant.',
-    'Use only the AI assistant provided within this task. Your interactions with it will be recorded as study data.'
+    'Questions, where you will enter your responses; AI Assistant, where you can interact with the AI assistant who has context of the study you are reviewing (no need to copy and paste the study to the AI). These are the two tabs at the top of the right panel.',
+    'The AI assistant will have access to the paper currently displayed, so you may ask about the paper without pasting the full text.',
+    'You may send up to FIVE queries to the AI assistant for each study. The number of messages remaining will be displayed in the AI Assistant tab. You will receive the SAME compensation regardless of how much you use AI.'
   ]
 };
 
+// Verbatim from the spec doc's "Additional Instructions: No-AI Condition
+// Only" section.
 const INSTRUCTIONS_NOAI_ONLY = [
-  'Please evaluate each study using only the paper provided and your own understanding. Do not use AI assistants or any other outside tools or materials.'
+  'Please complete the task using only the research papers provided on this page and your own understanding.',
+  'Do not use AI assistants, search engines, websites, notes, or other outside tools or materials.'
 ];
 
 const INSTRUCTIONS_MOCKUP_SVG_QUESTIONS = `<svg viewBox="0 0 560 280" xmlns="http://www.w3.org/2000/svg">
@@ -2532,6 +2588,31 @@ document.addEventListener('change', (e) => {
 // any extra bookkeeping. PAPERS[paperId].title is read fresh for both the
 // transition page and every question (not just the first per paper) so the
 // title always reflects the paper the current page belongs to.
+// Fisher-Yates shuffle. Returns a NEW array — never mutates the input —
+// since PAPERS[paperId].quiz and its per-question `options` arrays are
+// shared, reused data (e.g. across a retried submission) and must stay in
+// their original, canonical order.
+function shuffleArray(arr) {
+  const out = arr.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+// Per spec section 9 ("make sure we randomize the question and answer
+// option orders"): for each paper, both the order the four quiz questions
+// are shown in, and the order each question's four answer options are
+// shown in, are randomized once per participant. Quiz pages are only ever
+// built once per session (guarded by QUIZ_PAGE_IDS.length === 0 at the
+// call site), so this randomization is stable for the rest of the survey.
+// Built here, read by finishQuiz() below: maps each quiz field name to the
+// option letter that is CORRECT in that participant's shuffled rendering
+// (which will generally differ from qObj.correct, the canonical/original
+// letter, once options have been reshuffled).
+const QUIZ_RUNTIME_CORRECT = {};
+
 function buildQuizPages() {
   const container = document.getElementById('quizPagesContainer');
   if (!container) return;
@@ -2550,16 +2631,29 @@ function buildQuizPages() {
         <p class="quiz-transition-title">${escapeHtml(paperTitle)}</p>
       </div>
     </div>`;
-    PAPERS[paperId].quiz.forEach((qObj, qi) => {
+    const questionOrder = shuffleArray(PAPERS[paperId].quiz.map((_, i) => i));
+    questionOrder.forEach(qi => {
+      const qObj = PAPERS[paperId].quiz[qi];
       const pageId = 'page-quiz-' + paperId + '-' + qi;
       QUIZ_PAGE_IDS.push(pageId);
       const name = 'quiz_' + paperId + '_' + qi;
-      const optsHtml = qObj.options.map(opt => {
-        const letter = opt.trim()[0];
+
+      // Strip each option's original "X. " letter prefix, shuffle the
+      // remaining option texts, then relabel A/B/C/D in the new order —
+      // this is what makes the rendered letters independent of which
+      // letter was originally correct.
+      const letters = ['A', 'B', 'C', 'D'];
+      const plainOptions = qObj.options.map(opt => opt.replace(/^[A-D]\.\s*/, ''));
+      const shuffledIdx = shuffleArray(plainOptions.map((_, i) => i));
+      QUIZ_RUNTIME_CORRECT[name] = letters[shuffledIdx.indexOf(qObj.correct.charCodeAt(0) - 'A'.charCodeAt(0))];
+
+      const optsHtml = shuffledIdx.map((origIdx, newPos) => {
+        const newLetter = letters[newPos];
+        const text = `${newLetter}. ${plainOptions[origIdx]}`;
         return `<label class="option-item" data-group="${name}">
-          <input type="radio" name="${name}" value="${letter}">
+          <input type="radio" name="${name}" value="${newLetter}">
           <div class="option-dot"></div>
-          <div class="option-text">${escapeHtml(opt)}</div>
+          <div class="option-text">${escapeHtml(text)}</div>
         </label>`;
       }).join('');
       html += `<div class="page" id="${pageId}">
@@ -2583,7 +2677,8 @@ function finishQuiz() {
       const chosen = document.querySelector(`input[name="${name}"]:checked`);
       const val = chosen ? chosen.value : null;
       DATA.responses[name] = val;
-      if (val === qObj.correct) score++;
+      const correctLetter = QUIZ_RUNTIME_CORRECT[name] || qObj.correct;
+      if (val === correctLetter) score++;
     });
   });
   DATA.quiz_score = score;
@@ -2631,6 +2726,7 @@ function flattenForExport() {
     ct_scale_placement: DATA.ct_scale_placement,
     critical_thinking_placement: DATA.critical_thinking_placement,
     research_role: DATA.research_role,
+    research_role_years: DATA.research_role_years,
     assignment_cell: DATA.assignment_cell,
     assignment_assigned_at: DATA.assignment_assigned_at,
     assignment_source: DATA.assignment_source,
@@ -2967,4 +3063,3 @@ document.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   if (params.get('admin') === '1') openAdminOverlay();
 });
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
