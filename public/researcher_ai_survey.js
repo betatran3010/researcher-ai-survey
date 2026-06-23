@@ -127,58 +127,15 @@ const TENURE_OPTIONS = [
   'More than 2 years'
 ];
 
-// Section 4, Q4 sliders (verbatim left/right anchor text from spec)
-const SLIDERS = [
-  { key: 'slider_role_balance', q: 'When I use AI for research work, my role is...', left: 'AI does the work, I use what it produces', right: 'I do the work, AI at most assists my decisions' },
-  { key: 'slider_dependence', q: 'Over time, using AI has made me...', left: 'More capable and independent on my own in research tasks', right: 'More reliant on AI for research tasks I used to do myself' },
-  { key: 'slider_origin', q: 'When I use AI for research work, it feels like it is...', left: 'Surfacing information that already exists', right: 'Creating something new or creative' },
-  { key: 'slider_personhood', q: 'AI feels to me like...', left: 'A neutral, impersonal instrument', right: 'Something with its own point of view' }
-];
-
 const LANG_OPTIONS = ['English', 'Other'];
 
-const REVIEWED_OPTIONS = ['None', '1–5', '6–15', '16–30', 'More than 30'];
-
-const COUNTRY_OPTIONS = [
-  'United States', 'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Argentina', 'Armenia', 'Australia', 'Austria',
-  'Azerbaijan', 'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados', 'Belarus', 'Belgium', 'Belize', 'Benin', 'Bhutan',
-  'Bolivia', 'Bosnia and Herzegovina', 'Botswana', 'Brazil', 'Brunei', 'Bulgaria', 'Burkina Faso', 'Burundi',
-  'Cambodia', 'Cameroon', 'Canada', 'Cape Verde', 'Central African Republic', 'Chad', 'Chile', 'China', 'Colombia',
-  'Comoros', 'Costa Rica', 'Croatia', 'Cuba', 'Cyprus', 'Czech Republic', 'Denmark', 'Djibouti', 'Dominican Republic',
-  'Ecuador', 'Egypt', 'El Salvador', 'Equatorial Guinea', 'Eritrea', 'Estonia', 'Eswatini', 'Ethiopia', 'Fiji',
-  'Finland', 'France', 'Gabon', 'Gambia', 'Georgia', 'Germany', 'Ghana', 'Greece', 'Grenada', 'Guatemala', 'Guinea',
-  'Guinea-Bissau', 'Guyana', 'Haiti', 'Honduras', 'Hungary', 'Iceland', 'India', 'Indonesia', 'Iran', 'Iraq', 'Ireland',
-  'Israel', 'Italy', 'Ivory Coast', 'Jamaica', 'Japan', 'Jordan', 'Kazakhstan', 'Kenya', 'Kiribati', 'Kosovo', 'Kuwait',
-  'Kyrgyzstan', 'Laos', 'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya', 'Liechtenstein', 'Lithuania', 'Luxembourg',
-  'Madagascar', 'Malawi', 'Malaysia', 'Maldives', 'Mali', 'Malta', 'Marshall Islands', 'Mauritania', 'Mauritius',
-  'Mexico', 'Micronesia', 'Moldova', 'Monaco', 'Mongolia', 'Montenegro', 'Morocco', 'Mozambique', 'Myanmar', 'Namibia',
-  'Nauru', 'Nepal', 'Netherlands', 'New Zealand', 'Nicaragua', 'Niger', 'Nigeria', 'North Korea', 'North Macedonia',
-  'Norway', 'Oman', 'Pakistan', 'Palau', 'Palestine', 'Panama', 'Papua New Guinea', 'Paraguay', 'Peru', 'Philippines',
-  'Poland', 'Portugal', 'Qatar', 'Romania', 'Russia', 'Rwanda', 'Saint Kitts and Nevis', 'Saint Lucia',
-  'Saint Vincent and the Grenadines', 'Samoa', 'San Marino', 'Sao Tome and Principe', 'Saudi Arabia', 'Senegal',
-  'Serbia', 'Seychelles', 'Sierra Leone', 'Singapore', 'Slovakia', 'Slovenia', 'Solomon Islands', 'Somalia',
-  'South Africa', 'South Korea', 'South Sudan', 'Spain', 'Sri Lanka', 'Sudan', 'Suriname', 'Sweden', 'Switzerland',
-  'Syria', 'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Timor-Leste', 'Togo', 'Tonga', 'Trinidad and Tobago',
-  'Tunisia', 'Turkey', 'Turkmenistan', 'Tuvalu', 'Uganda', 'Ukraine', 'United Arab Emirates', 'United Kingdom',
-  'Uruguay', 'Uzbekistan', 'Vanuatu', 'Vatican City', 'Venezuela', 'Vietnam', 'Yemen', 'Zambia',
-  'Zimbabwe', 'Prefer not to say'
-];
+const REVIEWED_OPTIONS = ['None', '1–5', '6–20', '20–50', '51–100', 'More than 100'];
 
 const UNDERSTANDING_OPTIONS = [
   'I just use it. I do not think much about how it works.',
   'I have a general sense. It learns from a lot of text and generates responses.',
   'I understand it reasonably well. I know about training, prompting, and limitations.',
   'I understand it technically. I work with or study AI systems.'
-];
-
-const ENGAGEMENT_OPTIONS = [
-  { l: 'I used it to clarify or check my understanding of the study.' },
-  { l: 'I used it to summarize part or all of the study.' },
-  { l: 'I used it to help develop, refine, or question my own ideas.' },
-  { l: 'I used it to suggest possible interpretations, strengths, limitations, or future directions.' },
-  { l: 'I used it to organize, phrase, or improve my written responses.' },
-  { l: 'I read its responses but made little or no use of them in my answers.' },
-  { l: 'I did not use the AI assistant for this study.', exclusive: true }
 ];
 
 // SRL — 21 items, 6 categories (verbatim from spec)
@@ -1210,14 +1167,6 @@ function toggleConsent(inputId, visualId) {
   visual.classList.toggle('checked', input.checked);
 }
 
-function populateCountrySelect() {
-  const select = document.getElementById('ay_country');
-  if (!select || select.dataset.populated) return; // never re-run, so an in-progress selection is never reset
-  const options = COUNTRY_OPTIONS.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-  select.insertAdjacentHTML('beforeend', options);
-  select.dataset.populated = 'true';
-}
-
 function renderRadioGroup(containerId, name, options, getLabel, type) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -1408,19 +1357,6 @@ function renderAllSections() {
   renderRadioGroup('rg-ai-tenure', 'ai_tenure', TENURE_OPTIONS);
   renderRadioGroup('rg-ai-understanding', 'ai_understanding', UNDERSTANDING_OPTIONS);
 
-  const slidersWrap = document.getElementById('slidersWrap');
-  if (slidersWrap) {
-    slidersWrap.innerHTML = SLIDERS.map(s => `
-      <div class="slider-block">
-        <div class="slider-q">${escapeHtml(s.q)}</div>
-        <div class="slider-ends">
-          <div class="slider-end">${escapeHtml(s.left)}</div>
-          <div class="slider-end right">${escapeHtml(s.right)}</div>
-        </div>
-        <input type="range" min="0" max="100" value="50" data-key="${s.key}" oninput="updateSliderFill(this); DATA.responses['${s.key}']=this.value;">
-      </div>`).join('');
-    slidersWrap.querySelectorAll('input[type="range"]').forEach(updateSliderFill);
-  }
 }
 
 // Shows/hides a free-text "specify" input next to a checkbox/radio group
@@ -1466,7 +1402,7 @@ const INSTRUCTIONS_AI_ONLY = {
   bullets: [
     'Use the Questions and AI Assistant tabs to switch between writing your responses and consulting the assistant.',
     'The assistant will already have access to the study currently displayed.',
-    'You may send up to five messages for each study. The number remaining will be shown in the AI Assistant tab.',
+    'You may send up to five messages for each study. The number remaining will be shown in the AI Assistant tab. You will receive the same compensation regardless of how much you use the AI assistant.',
     'Use only the AI assistant provided within this task. Your interactions with it will be recorded as study data.'
   ]
 };
@@ -2522,11 +2458,10 @@ function prepareReflectionsPage() {
   }
 }
 
-// Single shared AI-engagement (multi-select) + ownership (1-7 scale)
-// question pair, asked once across both papers — per the spec's "Select all
-// that apply" / "Overall, whose thinking..." wording (verbatim, not
-// per-paper). Field names are fixed ('ai_engagement', 'whose_thinking') and
-// picked up by collectFieldsNow()'s generic name-based collection.
+// Shared ownership (1-7 scale) question, asked once across both papers —
+// per the spec's "Overall, whose thinking..." wording (verbatim, not
+// per-paper). Field name is fixed ('whose_thinking') and picked up by
+// collectFieldsNow()'s generic name-based collection.
 function buildPerPaperAiReflections() {
   const wrap = document.getElementById('perPaperAiReflectionsWrap');
   if (!wrap) return;
@@ -2534,13 +2469,6 @@ function buildPerPaperAiReflections() {
   const wtName = 'whose_thinking';
 
   wrap.innerHTML = `
-    <div class="q-card">
-      <div class="q-label">
-        How did you engage with the AI assistant during the previous task? Select all that apply.
-      </div>
-      <div class="options-grid" id="engageWrap"></div>
-    </div>
-
     <div class="q-card">
       <div class="q-label">
         Overall, whose thinking is reflected in your responses?
@@ -2574,17 +2502,9 @@ function buildPerPaperAiReflections() {
       </div>
     </div>
   `;
-
-  renderRadioGroup(
-    'engageWrap',
-    'ai_engagement',
-    ENGAGEMENT_OPTIONS,
-    o => o.l,
-    'checkbox'
-  );
 }
 
-// Exclusive-checkbox handling + selected-state styling
+// Selected-state styling for radio/checkbox option cards.
 document.addEventListener('change', (e) => {
   const t = e.target;
   if (t.matches('.option-item input[type="radio"], .option-item input[type="checkbox"]')) {
@@ -2594,21 +2514,6 @@ document.addEventListener('change', (e) => {
       item.classList.add('selected');
     } else {
       item.classList.toggle('selected', t.checked);
-      if (t.name.startsWith('ai_engagement')) {
-        const opt = ENGAGEMENT_OPTIONS.find(o => o.l === t.value);
-        const exclusiveVals = ENGAGEMENT_OPTIONS.filter(o => o.exclusive).map(o => o.l);
-        if (t.checked) {
-          if (opt && opt.exclusive) {
-            document.querySelectorAll(`input[name="${t.name}"]`).forEach(inp => {
-              if (inp !== t) { inp.checked = false; inp.closest('.option-item')?.classList.remove('selected'); }
-            });
-          } else {
-            document.querySelectorAll(`input[name="${t.name}"]`).forEach(inp => {
-              if (exclusiveVals.includes(inp.value)) { inp.checked = false; inp.closest('.option-item')?.classList.remove('selected'); }
-            });
-          }
-        }
-      }
     }
   }
 });
@@ -3034,7 +2939,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   initConsentPage();
-  populateCountrySelect();
   // Populate the About You / SRL / CT / AI-experience radio groups and sliders
   // up front. Previously this only happened in finalizeAboutYou(), which runs
   // when leaving the About You page — so the page-about-you radio groups
@@ -3063,3 +2967,4 @@ document.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
   if (params.get('admin') === '1') openAdminOverlay();
 });
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
