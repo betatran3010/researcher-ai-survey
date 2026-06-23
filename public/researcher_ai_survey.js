@@ -1536,8 +1536,14 @@ const INSTRUCTIONS_PAGES_AI_ONLY = [
       'You will have access to an AI assistant (ChatGPT) during the paper evaluation task. At the top of the right panel, you will see two tabs:'
     ],
     bullets: [
-      'Questions, where you will enter your responses',
-      'AI Assistant, where you can interact with the AI assistant who has context of the study you are reviewing (no need to copy and paste the study to the AI)'
+      {
+        label: 'Questions',
+        text: 'where you will enter your responses'
+      },
+      {
+        label: 'AI Assistant',
+        text: 'where you can interact with the AI assistant who has context of the study you are reviewing (no need to copy and paste the study to the AI)'
+      }
     ],
     mockup: 'ai'
   },
@@ -1680,12 +1686,26 @@ function buildInstructionsPages() {
 
     const bulletsHtml = Array.isArray(page.bullets)
       ? `
-        <ul class="instructions-bullets">
-          ${page.bullets
-        .map(bullet => `<li>${escapeHtml(bullet)}</li>`)
+    <ul class="instructions-bullets">
+      ${page.bullets
+        .map(bullet => {
+          if (
+            bullet &&
+            typeof bullet === 'object'
+          ) {
+            return `
+              <li>
+                <strong>${escapeHtml(bullet.label)}</strong>,
+                ${escapeHtml(bullet.text)}
+              </li>
+            `;
+          }
+
+          return `<li>${escapeHtml(bullet)}</li>`;
+        })
         .join('')}
-        </ul>
-      `
+    </ul>
+  `
       : '';
 
     let mockupHtml = '';
