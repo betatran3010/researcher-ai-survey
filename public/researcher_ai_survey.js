@@ -485,14 +485,31 @@ let INSTRUCTIONS_PAGE_IDS = [];
 
 function buildPageOrder() {
   const order = ['page-consent', 'page-about-you', 'page-srl'];
-  if (DATA.ct_scale_placement === 'pre') order.push('page-ct');
+
+  if (DATA.ct_scale_placement === 'pre') {
+    order.push('page-ct');
+  }
+
   order.push('page-ai-experience');
-  order.push(...(INSTRUCTIONS_PAGE_IDS.length ? INSTRUCTIONS_PAGE_IDS : ['page-instructions']));
-  order.push('page-study-1', 'page-study-2', 'page-reflections');
-  if (DATA.ct_scale_placement === 'post') order.push('page-ct');
+
+  if (INSTRUCTIONS_PAGE_IDS.length > 0) {
+    order.push(...INSTRUCTIONS_PAGE_IDS);
+  }
+
+  order.push(
+    'page-study-1',
+    'page-study-2',
+    'page-reflections'
+  );
+
+  if (DATA.ct_scale_placement === 'post') {
+    order.push('page-ct');
+  }
+
   order.push('page-quiz-intro');
   order.push(...QUIZ_PAGE_IDS);
   order.push('page-debrief', 'page-submitted');
+
   pageOrder = order;
   applySectionNumbers();
 }
