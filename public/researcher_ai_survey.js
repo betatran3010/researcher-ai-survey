@@ -1535,7 +1535,7 @@ const INSTRUCTIONS_PAGES_AI_ONLY = [
   },
   {
     paragraphs: [
-      'You may send up to FIVE queries to the AI assistant for each study. The number of messages remaining will be displayed in the AI Assistant tab. You will receive the SAME compensation regardless of how much you use AI.'
+      'You may send up to [[FIVE]] queries to the AI assistant for each study. The number of messages remaining will be displayed in the AI Assistant tab. You will receive the [[SAME]] compensation regardless of how much you use AI.'
     ]
   }
 ];
@@ -1647,16 +1647,18 @@ function buildInstructionsPages() {
       </div>
     `;
 
-    const paragraphs = Array.isArray(page.paragraphs)
-      ? page.paragraphs
-      : [];
-
     const paraHtml = paragraphs
-      .map(text => `
-        <p style="margin-bottom:14px;">
-          ${escapeHtml(text)}
-        </p>
-      `)
+      .map(text => {
+        const safeText = escapeHtml(text)
+          .replace(/\[\[FIVE\]\]/g, '<strong>FIVE</strong>')
+          .replace(/\[\[SAME\]\]/g, '<strong>SAME</strong>');
+
+        return `
+      <p style="margin-bottom:14px;">
+        ${safeText}
+      </p>
+    `;
+      })
       .join('');
 
     const bulletsHtml = Array.isArray(page.bullets)
