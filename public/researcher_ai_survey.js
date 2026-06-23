@@ -481,11 +481,14 @@ function getPlainStudyText(paperId) {
 let pageOrder = ['page-consent'];
 let currentIdx = 0;
 let QUIZ_PAGE_IDS = [];
+let INSTRUCTIONS_PAGE_IDS = [];
 
 function buildPageOrder() {
   const order = ['page-consent', 'page-about-you', 'page-srl'];
   if (DATA.ct_scale_placement === 'pre') order.push('page-ct');
-  order.push('page-ai-experience', 'page-instructions', 'page-study-1', 'page-study-2', 'page-reflections');
+  order.push('page-ai-experience');
+  order.push(...(INSTRUCTIONS_PAGE_IDS.length ? INSTRUCTIONS_PAGE_IDS : ['page-instructions']));
+  order.push('page-study-1', 'page-study-2', 'page-reflections');
   if (DATA.ct_scale_placement === 'post') order.push('page-ct');
   order.push('page-quiz-intro');
   order.push(...QUIZ_PAGE_IDS);
@@ -874,7 +877,8 @@ function updateNav() {
     if (btnNext) btnNext.style.display = 'none';
   } else {
     if (btnNext) btnNext.style.display = '';
-    if (btnNext) btnNext.textContent = (curId === 'page-debrief') ? 'Finish' : (/^page-instructions$/.test(curId) ? 'Begin Task →' : 'Continue →');
+    const lastInstrId = INSTRUCTIONS_PAGE_IDS[INSTRUCTIONS_PAGE_IDS.length - 1];
+    if (btnNext) btnNext.textContent = (curId === 'page-debrief') ? 'Finish' : (curId === lastInstrId ? 'Begin Task →' : 'Continue →');
   }
   const topMeta = document.getElementById('topMeta');
   if (topMeta) topMeta.textContent = 'ID: ' + DATA.participant_id;
@@ -943,7 +947,8 @@ function advanceFromIndex(idx, dir) {
   const curId = pageOrder[idx];
   currentIdx = nextIdx;
 
-  if (curId === 'page-instructions' && dir > 0) {
+  const lastInstrId = INSTRUCTIONS_PAGE_IDS[INSTRUCTIONS_PAGE_IDS.length - 1];
+  if (curId === lastInstrId && dir > 0) {
     enterFullscreenAndStart();
   }
   if (curId === 'page-quiz-intro' && dir > 0 && QUIZ_PAGE_IDS.length === 0) {
@@ -960,9 +965,9 @@ function advanceFromIndex(idx, dir) {
 // Pure/local — no network call here; assignConditionAndOrder() already ran
 // inside requestAssignmentWithUI() before this is called.
 function finalizeAboutYou() {
+  buildInstructionsPages();
   buildPageOrder();
   renderAllSections();
-  buildInstructionsText();
   buildStudyPages();
 }
 
@@ -1010,6 +1015,7 @@ function validateCurrentPage() {
   const pageId = pageEl.id;
   const noResponseRequired =
     pageId === 'page-instructions' ||
+    /^page-instructions-/.test(pageId) ||
     pageId === 'page-quiz-intro' ||
     pageId === 'page-debrief' ||
     pageId === 'page-submitted' ||
@@ -1432,39 +1438,61 @@ function setupRoleYearsField(containerId, fieldName, options) {
   sync();
 }
 
-// ---------- Instructions text ----------
+// ---------- Instructions pages ----------
 const INSTRUCTIONS_TITLE = 'Paper Evaluation Task';
 
 // Verbatim from the spec doc's "Instructions Shown to All Participants"
-// section. The researcher implementation note there asks for these to be
-// split into separate pages (one paragraph per page, with a Next click
-// between each) to encourage reading; buildInstructionsText currently
-// renders them as stacked paragraphs on a single page.
-const INSTRUCTIONS_COMMON = [
-  'You will now read two short research studies, presented one at a time.',
-  'For each study, the paper will appear on the left side of the page, and the response questions will appear on the right. After reading the study, you will identify its strengths and limitations, suggest improvements or future directions, and rate how convincing you find its conclusions.',
-  'The studies in this task were artificially constructed. When reviewing each study, please apply the same analytical and scientific reasoning and judgment that you would use when assessing real research.',
-  'Please complete the task without using any outside tools or resources. Your activity will be recorded, and the task will be displayed in fullscreen mode to help you stay focused.'
+// section, split per mentor comments #4/#5 ("Split instructions into
+// separate pages where participants have to click next to encourage
+// reading. Maybe to one paragraph per page.") into one page object per
+// spec-doc "Page N" — see buildInstructionsPages() below, which renders
+// each entry as its own page with a normal Continue button.
+const INSTRUCTIONS_PAGES_COMMON = [
+  { paragraphs: [
+    'You will now read two short research studies, presented one at a time.',
+    'For each study, the paper will appear on the left side of the page, and the response questions will appear on the right. After reading the study, you will identify its strengths and limitations, suggest improvements or future directions, and rate how convincing you find its conclusions.'
+  ] },
+  { paragraphs: [
+    'The studies in this task were artificially constructed. When reviewing each study, please apply the same analytical and scientific reasoning and judgment that you would use when assessing real research.'
+  ] },
+  { paragraphs: [
+    'Please complete the task without using any outside tools or resources. Your activity will be recorded, and the task will be displayed in full-screen mode to help you stay focused.'
+  ] }
 ];
 
 // Verbatim from the spec doc's "Additional Instructions: AI Condition
-// Only" section. AI-condition-only block: one intro paragraph followed by
-// a bullet list (rendered as <ul><li> by buildInstructionsText, not plain
-// <p> paragraphs like INSTRUCTIONS_COMMON/INSTRUCTIONS_NOAI_ONLY).
-const INSTRUCTIONS_AI_ONLY = {
-  intro: 'You will have access to an AI assistant (ChatGPT) during the paper evaluation task.',
-  bullets: [
-    'Questions, where you will enter your responses; AI Assistant, where you can interact with the AI assistant who has context of the study you are reviewing (no need to copy and paste the study to the AI). These are the two tabs at the top of the right panel.',
-    'The AI assistant will have access to the paper currently displayed, so you may ask about the paper without pasting the full text.',
-    'You may send up to FIVE queries to the AI assistant for each study. The number of messages remaining will be displayed in the AI Assistant tab. You will receive the SAME compensation regardless of how much you use AI.'
-  ]
-};
+// Only" section, split into "Page 4"/"Page 5"/"Page 6". Page 6 also shows
+// the AI-condition interface demonstration per "[Show AI-condition
+// interface demonstration.]".
+const INSTRUCTIONS_PAGES_AI_ONLY = [
+  { paragraphs: [
+      'You will have access to an AI assistant (ChatGPT) during the paper evaluation task. At the top of the right panel, you will see two tabs:'
+    ],
+    bullets: [
+      'Questions, where you will enter your responses',
+      'AI Assistant, where you can interact with the AI assistant who has context of the study you are reviewing (no need to copy and paste the study to the AI)'
+    ]
+  },
+  { paragraphs: [
+    'The AI assistant will have access to the paper currently displayed, so you may ask about the paper without pasting the full text.'
+  ] },
+  { paragraphs: [
+      'You may send up to FIVE queries to the AI assistant for each study. The number of messages remaining will be displayed in the AI Assistant tab. You will receive the SAME compensation regardless of how much you use AI.'
+    ],
+    mockup: 'ai'
+  }
+];
 
 // Verbatim from the spec doc's "Additional Instructions: No-AI Condition
-// Only" section.
-const INSTRUCTIONS_NOAI_ONLY = [
-  'Please complete the task using only the research papers provided on this page and your own understanding.',
-  'Do not use AI assistants, search engines, websites, notes, or other outside tools or materials.'
+// Only" section ("Page 4"), which also shows the No-AI-condition interface
+// demonstration per "[Show No-AI-condition interface demonstration.]".
+const INSTRUCTIONS_PAGES_NOAI_ONLY = [
+  { paragraphs: [
+      'Please complete the task using only the research papers provided on this page and your own understanding.',
+      'Do not use AI assistants, search engines, websites, notes, or other outside tools or materials.'
+    ],
+    mockup: 'noai'
+  }
 ];
 
 const INSTRUCTIONS_MOCKUP_SVG_QUESTIONS = `<svg viewBox="0 0 560 280" xmlns="http://www.w3.org/2000/svg">
@@ -1521,28 +1549,60 @@ const INSTRUCTIONS_MOCKUP_SVG_NOAI = `<svg viewBox="0 0 560 280" xmlns="http://w
   <rect x="280" y="188" width="252" height="52" rx="6" fill="#f3f5f8" stroke="#d9e2ec"/>
 </svg>`;
 
-function buildInstructionsText() {
+// Builds one <div class="page"> per instructions-page entry (spec doc
+// "Page 1", "Page 2", ... ) into #instructionsPagesContainer, and records
+// their ids in INSTRUCTIONS_PAGE_IDS so buildPageOrder() can splice them
+// into the normal forward/back page sequence — participants click the
+// same Continue button used everywhere else in the survey to move between
+// them, one page per click, per mentor comments #4/#5. Mirrors the
+// existing buildQuizPages() pattern (dynamic sub-pages inserted into
+// pageOrder) used for the comprehension quiz.
+function buildInstructionsPages() {
+  const container = document.getElementById('instructionsPagesContainer');
+  if (!container) return;
+  INSTRUCTIONS_PAGE_IDS = [];
   const isAI = DATA.condition === 'AI';
-  let html = `<p class="instructions-title">${escapeHtml(INSTRUCTIONS_TITLE)}</p>`;
-  html += INSTRUCTIONS_COMMON.map(t => `<p style="margin-bottom:14px;">${escapeHtml(t)}</p>`).join('');
-  if (isAI) {
-    html += `<p style="margin-bottom:14px;">${escapeHtml(INSTRUCTIONS_AI_ONLY.intro)}</p>`;
-    html += `<ul class="instructions-bullets">${INSTRUCTIONS_AI_ONLY.bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('')}</ul>`;
-  } else {
-    html += INSTRUCTIONS_NOAI_ONLY.map(t => `<p style="margin-bottom:14px;">${escapeHtml(t)}</p>`).join('');
-  }
-  const textEl = document.getElementById('instructionsText');
-  if (textEl) textEl.innerHTML = html;
-  const mockupEl = document.getElementById('instructionsMockup');
-  if (mockupEl) {
-    mockupEl.innerHTML = isAI ? `
-      <div class="mockup-block">${INSTRUCTIONS_MOCKUP_SVG_QUESTIONS}</div>
-      <p class="mockup-note">${escapeHtml(INSTRUCTIONS_MOCKUP_NOTE)}</p>
-      <div class="mockup-block">${INSTRUCTIONS_MOCKUP_SVG_AI}</div>
-    ` : `
-      <div class="mockup-block">${INSTRUCTIONS_MOCKUP_SVG_NOAI}</div>
-    `;
-  }
+  const pages = INSTRUCTIONS_PAGES_COMMON.concat(isAI ? INSTRUCTIONS_PAGES_AI_ONLY : INSTRUCTIONS_PAGES_NOAI_ONLY);
+  let html = '';
+  pages.forEach((page, i) => {
+    const pageId = 'page-instructions-' + i;
+    INSTRUCTIONS_PAGE_IDS.push(pageId);
+
+    // Only the very first instructions page shows the section header (and
+    // task title) — later pages are a continuation of the same section, as
+    // with the quiz transition/question pages.
+    const headerHtml = i === 0
+      ? `<div class="section-label"><div class="section-number" id="secnum-task">5</div><div class="section-title">Task</div></div>`
+      : '';
+    const titleHtml = i === 0 ? `<p class="instructions-title">${escapeHtml(INSTRUCTIONS_TITLE)}</p>` : '';
+    const paraHtml = page.paragraphs.map(t => `<p style="margin-bottom:14px;">${escapeHtml(t)}</p>`).join('');
+    const bulletsHtml = page.bullets
+      ? `<ul class="instructions-bullets">${page.bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('')}</ul>`
+      : '';
+    let mockupHtml = '';
+    if (page.mockup === 'ai') {
+      mockupHtml = `<div class="instructions-mockup">
+        <div class="mockup-block">${INSTRUCTIONS_MOCKUP_SVG_QUESTIONS}</div>
+        <p class="mockup-note">${escapeHtml(INSTRUCTIONS_MOCKUP_NOTE)}</p>
+        <div class="mockup-block">${INSTRUCTIONS_MOCKUP_SVG_AI}</div>
+      </div>`;
+    } else if (page.mockup === 'noai') {
+      mockupHtml = `<div class="instructions-mockup">
+        <div class="mockup-block">${INSTRUCTIONS_MOCKUP_SVG_NOAI}</div>
+      </div>`;
+    }
+
+    html += `<div class="page survey-page" id="${pageId}">
+      ${headerHtml}
+      <div class="q-card">
+        ${titleHtml}
+        ${paraHtml}
+        ${bulletsHtml}
+        ${mockupHtml}
+      </div>
+    </div>`;
+  });
+  container.innerHTML = html;
 }
 
 // ---------- Study pages ----------
