@@ -1276,7 +1276,24 @@ function validateCurrentPage() {
       }, 0);
     }
 
-    showWarnBanner('Please answer all questions on this page before continuing.');
+    const invalidNumberInput = Array.from(
+      pageEl.querySelectorAll('input[type="number"]')
+    ).find(input => {
+      if (!isFieldVisible(input) || input.disabled) {
+        return false;
+      }
+
+      return getNumberInputError(input) !== '';
+    });
+
+    if (invalidNumberInput) {
+      const message = getNumberInputError(invalidNumberInput);
+      showNumberInputError(invalidNumberInput, message);
+    } else {
+      showWarnBanner(
+        'Please answer all questions on this page before continuing.'
+      );
+    }
     return false;
   }
 
@@ -2703,6 +2720,115 @@ function showWarnBanner(msg) {
   showWarnBanner._t = setTimeout(() => { banner.style.display = 'none'; }, 4000);
 }
 
+// ---------- Immediate validation for numerical responses ----------
+function getNumberInputError(input) {
+  const rawValue = String(input.value || '').trim();
+
+  // Leave empty-field feedback to the normal required-response validation.
+  if (rawValue === '') {
+    return '';
+  }
+
+  if (input.validity.badInput) {
+    return 'Please enter a valid number.';
+  }
+
+  if (input.validity.rangeUnderflow) {
+    return `Please enter a value of at least ${input.min}.`;
+  }
+
+  if (input.validity.rangeOverflow) {
+    return `Please enter a value no greater than ${input.max}.`;
+  }
+
+  if (input.validity.stepMismatch) {
+    return 'Please enter a whole number.';
+  }
+
+  return '';
+}
+
+function clearNumberInputError(input) {
+  input.classList.remove('input-error');
+  input.removeAttribute('aria-invalid');
+
+  const existingHint = input.nextElementSibling;
+
+  if (
+    existingHint &&
+    existingHint.classList.contains('number-error-hint')
+  ) {
+    existingHint.remove();
+  }
+}
+
+function showNumberInputError(input, message) {
+  input.classList.add('input-error');
+  input.setAttribute('aria-invalid', 'true');
+
+  let hint = input.nextElementSibling;
+
+  if (
+    !hint ||
+    !hint.classList.contains('number-error-hint')
+  ) {
+    hint = document.createElement('div');
+    hint.className = 'error-hint number-error-hint';
+    hint.setAttribute('role', 'alert');
+    hint.setAttribute('aria-live', 'polite');
+    input.insertAdjacentElement('afterend', hint);
+  }
+
+  hint.textContent = message;
+  hint.style.display = 'block';
+
+  // Do not repeatedly restart the banner for the same error on every keypress.
+  if (input.dataset.lastNumberError !== message) {
+    showWarnBanner(message);
+    input.dataset.lastNumberError = message;
+  }
+}
+
+function validateNumberInputImmediately(input) {
+  const message = getNumberInputError(input);
+
+  if (message) {
+    showNumberInputError(input, message);
+    return false;
+  }
+
+  delete input.dataset.lastNumberError;
+  clearNumberInputError(input);
+  return true;
+}
+
+function initializeImmediateNumberValidation() {
+  // Document-level listeners also catch the dynamically created PhD-year input.
+  document.addEventListener('input', event => {
+    const input = event.target;
+
+    if (
+      input &&
+      input.tagName === 'INPUT' &&
+      input.type === 'number'
+    ) {
+      validateNumberInputImmediately(input);
+    }
+  });
+
+  document.addEventListener('change', event => {
+    const input = event.target;
+
+    if (
+      input &&
+      input.tagName === 'INPUT' &&
+      input.type === 'number'
+    ) {
+      validateNumberInputImmediately(input);
+    }
+  });
+}
+
 function violationMessage(type) {
   const map = {
     visibility: 'Please stay on this tab while completing the task.',
@@ -3776,6 +3902,10 @@ setInterval(autosave, 10000);
 
 // ---------- Init ----------
 document.addEventListener('DOMContentLoaded', async () => {
+  // Turn on immediate feedback for all number inputs, including the
+  // dynamically created PhD-year field.
+  initializeImmediateNumberValidation();
+
   // ===================== TEST MODE (DEV/QA ONLY) =====================
   // Must resolve before anything else touches the page: on invalid test
   // params this replaces the entire page with a developer-facing error and
@@ -3788,31 +3918,43 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   initConsentPage();
-  // Populate the About You / SRL / CT / AI-experience radio groups and sliders
-  // up front. Previously this only happened in finalizeAboutYou(), which runs
-  // when leaving the About You page — so the page-about-you radio groups
-  // (first language, research role, reviewed-a-paper) were still empty the
-  // first time a participant actually saw that page. renderAllSections() is
-  // called again later (in finalizeAboutYou) to refresh CT intro text/order
-  // once condition assignment has happened; calling it here too is harmless.
+
+  // Populate the About You / SRL / CT / AI-experience radio groups and
+  // sliders before the participant reaches those pages.
   renderAllSections();
+
   pageOrder = ['page-consent'];
   currentIdx = 0;
   showPage('page-consent');
   updateNav();
 
   document.querySelectorAll('#page-reflections').forEach(() => { });
+
   const origNavigate = navigate;
-  // Hook to build reflections content right when that page is about to show.
+
+  // Build the reflections content when the reflections page becomes active.
   const observer = new MutationObserver(() => {
     const reflPage = document.getElementById('page-reflections');
-    if (reflPage && reflPage.classList.contains('active') && !reflPage._prepared) {
+
+    if (
+      reflPage &&
+      reflPage.classList.contains('active') &&
+      !reflPage._prepared
+    ) {
       reflPage._prepared = true;
       prepareReflectionsPage();
     }
   });
-  observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class'] });
+
+  observer.observe(document.body, {
+    attributes: true,
+    subtree: true,
+    attributeFilter: ['class']
+  });
 
   const params = new URLSearchParams(window.location.search);
-  if (params.get('admin') === '1') openAdminOverlay();
+
+  if (params.get('admin') === '1') {
+    openAdminOverlay();
+  }
 });
