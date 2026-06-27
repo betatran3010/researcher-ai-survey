@@ -2750,8 +2750,16 @@ function getNumberInputError(input) {
   }
 
   if (input.validity.stepMismatch) {
+  if (input.step === '0.5') {
+    return 'Please enter a value rounded to the nearest half hour.';
+  }
+
+  if (input.step === '1') {
     return 'Please enter a whole number.';
   }
+
+  return 'Please enter a valid value.';
+}
 
   return '';
 }
