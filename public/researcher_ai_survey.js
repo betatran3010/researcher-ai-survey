@@ -1169,8 +1169,8 @@ function finalizeAboutYou() {
 function finalizeStudyTiming(paperId) {
   // Flush and compute the viewport-tracking measures BEFORE duration_ms is
   // touched below -- stopViewportTracking() only writes into
-  // DATA.timing[paperId].{pdf_exposure_proportion_5s,
-  // region_exposed_5s_count,navigation_sequence,backward_transition_count}
+  // DATA.timing[paperId].{pdf_exposure_proportion_30s,
+  // region_exposed_30s_count,navigation_sequence,backward_transition_count}
   // and never reads
   // or sets duration_ms/study_end_ts/study_start_ts, so ordering here only
   // matters for making sure the final (still-open) viewport segment gets
@@ -2134,8 +2134,8 @@ function getStudyPdfImages(paperId) {
 // ------------------------------------------------------------
 // Adapted from two strands of the reading-behavior literature:
 //  - Lagun & Lalmas (2016): cumulative time-in-viewport with a
-//    5-second dwell threshold per content region. Used here as
-//    EXPOSURE_THRESHOLD_MS for pdf_exposure_proportion_5s.
+//    30-second dwell threshold per content region. Used here as
+//    EXPOSURE_THRESHOLD_MS for pdf_exposure_proportion_30s.
 //  - AOI (Area-of-Interest) Markov-chain navigation models: we
 //    discretize the viewport's vertical position into named
 //    nine within-page regions and track visits to compute
@@ -2170,7 +2170,7 @@ function getStudyPdfImages(paperId) {
 //     height and consistent across window sizes.
 //  4. The MIN_DWELL_MS filter applies only to navigation_sequence /
 //     backward_transition_count. It
-//     never affects pdf_exposure_proportion_5s, which still credits
+//     never affects pdf_exposure_proportion_30s, which still credits
 //     a bucket's actual visible/focused milliseconds regardless of
 //     how long any single visit lasted -- a participant who
 //     revisits a region in several short bursts that add up past
@@ -2184,10 +2184,10 @@ function getStudyPdfImages(paperId) {
 //     that dead time credited as a "visit" to whatever region happened to be
 //     on screen, and indeterminate/not-yet-rendered states never appear in
 //     navigation_sequence either.
-//  6. pdf_exposure_proportion_5s uses a strict > EXPOSURE_THRESHOLD_MS
+//  6. pdf_exposure_proportion_30s uses a strict > EXPOSURE_THRESHOLD_MS
 //     comparison ("viewport time longer than 5 seconds"), so a bucket
-//     exposed for exactly 5000ms does not count -- only buckets exposed for
-//     more than 5000ms do.
+//     exposed for exactly 30000ms does not count -- only buckets exposed for
+//     more than 30000ms do.
 //  7. navigation_sequence does not include explicit Start/Leave sentinel
 //     markers. The sequence already implicitly begins when markStudyStart()
 //     starts the tracker and ends when finalizeStudyTiming() stops it, so an
@@ -2202,7 +2202,7 @@ function getStudyPdfImages(paperId) {
 // is never described as proof of attentive reading or comprehension.
 // ============================================================
 
-const EXPOSURE_THRESHOLD_MS = 5000;
+const EXPOSURE_THRESHOLD_MS = 30000;
 const MAX_EXPOSURE_BUCKETS = 2000;
 const VIEWPORT_HEARTBEAT_MS = 1000;
 const MIN_DWELL_MS = 1000;
@@ -2473,7 +2473,7 @@ function tickSegment(paperId) {
   const { start, end } = bucketIndexRange(seg.top, seg.bottom, contentHeight, tracker.bucketCount);
   for (let i = start; i < end; i += 1) tracker.bucketExposedMs[i] += elapsed;
 
-  // Six-region proportional exposure crediting for region_exposed_5s_count:
+  // Six-region proportional exposure crediting for region_exposed_30s_count:
   // each region accumulates this tick's elapsed ms multiplied by the
   // fraction of that region's own height which is currently visible, so a
   // viewport straddling the boundary of two regions (e.g. the bottom of one
@@ -2588,7 +2588,7 @@ function aggregateNavigationSequence(rawLog) {
 // above). This runs BEFORE aggregateNavigationSequence(), so hidden/
 // unfocused/indeterminate dwell time can never inflate navigation_sequence
 // or backward_transition_count -- matching the same visible/focused gating
-// tickSegment() already applies to pdf_exposure_proportion_5s. Returns
+// tickSegment() already applies to pdf_exposure_proportion_30s. Returns
 // plain {region, ms} pairs, the input shape aggregateNavigationSequence()
 // expects.
 function filterNavigableSegments(rawLog) {
@@ -2669,8 +2669,8 @@ function stopViewportTracking(paperId) {
   const collapsed = aggregateNavigationSequence(navigable);
   const { backward } = countNavigationTransitions(collapsed);
 
-  // pdf_exposure_proportion_5s: unchanged document-wide bucket calculation
-  // (strict ">5000ms", full rendered content height, visible+focused-gated)
+  // pdf_exposure_proportion_30s: unchanged document-wide bucket calculation
+  // (strict ">30000ms", full rendered content height, visible+focused-gated)
   // -- this variable's definition did not change between the Phase 2 and
   // final Phase 3 specs. Blank only when the PDF/page never finished
   // rendering (tracker.contentReady false or zero buckets); a genuine
@@ -2686,7 +2686,7 @@ function stopViewportTracking(paperId) {
     exposureProportion = Number((exposedCount / tracker.bucketExposedMs.length).toFixed(4));
   }
 
-  // region_exposed_5s_count: blank only when real page/PDF geometry never
+  // region_exposed_30s_count: blank only when real page/PDF geometry never
   // became available (tracker.regions empty); a genuine 0 (no region ever
   // crossed the threshold) is preserved.
   let regionExposedCount = '';
@@ -2701,8 +2701,8 @@ function stopViewportTracking(paperId) {
   // valid region survived the visible/focused/min-dwell preprocessing
   // pipeline (collapsed.length === 0) -- a single retained state with zero
   // transitions is a genuine, measured "0", not a blank.
-  DATA.timing[paperId].pdf_exposure_proportion_5s = exposureProportion;
-  DATA.timing[paperId].region_exposed_5s_count = regionExposedCount;
+  DATA.timing[paperId].pdf_exposure_proportion_30s = exposureProportion;
+  DATA.timing[paperId].region_exposed_30s_count = regionExposedCount;
   DATA.timing[paperId].navigation_sequence = collapsed.length ? collapsed.join('>') : '';
   DATA.timing[paperId].backward_transition_count = collapsed.length ? backward : '';
 
