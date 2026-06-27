@@ -165,48 +165,166 @@ const UNDERSTANDING_OPTIONS = [
 // SRL — 21 items, 6 categories (verbatim from spec)
 const SRL_ITEMS = [
   // Goal Setting
-  ['srl_goal_standards', 'I set personal standards for the quality of my research work.', 'goal_setting'],
-  ['srl_goal_shortlong', 'I set short-term goals for what I want to accomplish in a specific research task, as well as longer-term goals for the overall project.', 'goal_setting'],
-  ['srl_goal_deadlines', 'I set realistic deadlines for completing research work.', 'goal_setting'],
-  // Strategic Planning
-  ['srl_plan_questions', 'I ask myself questions about what I need to understand or evaluate before I begin.', 'strategic_planning'],
-  ['srl_plan_alternatives', 'I think of alternative ways to approach a research problem and choose the one that seems most useful.', 'strategic_planning'],
-  ['srl_plan_adapt', 'When planning my research work, I use and adapt strategies that have worked in the past.', 'strategic_planning'],
-  ['srl_plan_organize', 'I organize my time and resources to accomplish my research goals to the best of my ability.', 'strategic_planning'],
-  // Task Strategies
-  ['srl_task_ownwords', 'I try to translate new information into my own words.', 'task_strategies'],
-  ['srl_task_change', 'I change strategies when I do not make progress.', 'task_strategies'],
-  ['srl_task_notes', 'When working on research tasks, I make notes to help organize my thoughts.', 'task_strategies'],
-  ['srl_task_examples', 'I create my own examples or interpretations to make information more meaningful.', 'task_strategies'],
-  // Elaboration
-  ['srl_elab_relate', 'When learning something new, I try to relate it to what I already know.', 'elaboration'],
-  ['srl_elab_combine', 'When learning something new, I combine different sources of information, such as papers, prior readings, AI tools, websites, or other materials.', 'elaboration'],
-  ['srl_elab_prior', 'I draw on my prior knowledge and research experience when interpreting new information.', 'elaboration'],
-  // Self-Evaluation
-  ['srl_eval_know', 'I usually know how well I understand something once I have finished working on it.', 'self_evaluation'],
-  ['srl_eval_different', 'After finishing a research task, I consider whether the task could be approached differently.', 'self_evaluation'],
-  ['srl_eval_learned', 'I think about what I have learned after I finish a research task.', 'self_evaluation'],
-  // Help Seeking
-  ['srl_help_identify', 'I try to identify specific questions I can ask when I need help.', 'help_seeking'],
-  ['srl_help_guidance', 'When I am unsure where to start, I seek guidance to help me decide how to approach the task.', 'help_seeking'],
-  ['srl_help_beforeown', 'I ask other people or AI what to think about a research task before I have formed my own view.', 'help_seeking'],
-  ['srl_help_own_r', 'Even when I am having trouble understanding something, I prefer to work through it on my own before asking for help.', 'help_seeking']
-];
+  [
+    'srl_goal_standards',
+    'I set personal standards for the quality of my research work.',
+    'goal_setting'
+  ],
+  [
+    'srl_goal_shortlong',
+    'I do not usually set short-term goals for what I want to accomplish in a specific research task or longer-term goals for the overall project.',
+    'goal_setting'
+  ],
+  [
+    'srl_goal_deadlines',
+    'I set realistic deadlines for completing research work.',
+    'goal_setting'
+  ],
 
+  // Strategic Planning
+  [
+    'srl_plan_questions',
+    'I often begin a research task without first considering what I need to understand or evaluate.',
+    'strategic_planning'
+  ],
+  [
+    'srl_plan_alternatives',
+    'I think of alternative ways to approach a research problem and choose the one that seems most useful.',
+    'strategic_planning'
+  ],
+  [
+    'srl_plan_adapt',
+    'When planning my research work, I do not usually use or adapt strategies that have worked for me in the past.',
+    'strategic_planning'
+  ],
+  [
+    'srl_plan_organize',
+    'I organize my time and resources to accomplish my research goals to the best of my ability.',
+    'strategic_planning'
+  ],
+
+  // Task Strategies
+  [
+    'srl_task_ownwords',
+    'I try to translate new information into my own words.',
+    'task_strategies'
+  ],
+  [
+    'srl_task_change',
+    'I continue using the same strategy even when it is not helping me make progress.',
+    'task_strategies'
+  ],
+  [
+    'srl_task_notes',
+    'When working on research tasks, I make notes to help organize my thoughts.',
+    'task_strategies'
+  ],
+  [
+    'srl_task_examples',
+    'I rarely create my own examples or interpretations to make information more meaningful.',
+    'task_strategies'
+  ],
+
+  [
+    'attention_check',
+    'Please select 2 for this item.',
+    'attention_check'
+  ],
+
+  // Elaboration
+  [
+    'srl_elab_relate',
+    'When learning something new, I try to relate it to what I already know.',
+    'elaboration'
+  ],
+  [
+    'srl_elab_combine',
+    'When learning something new, I rarely combine information across different sources, such as papers, prior readings, AI tools, websites, or other materials.',
+    'elaboration'
+  ],
+  [
+    'srl_elab_prior',
+    'I draw on my prior knowledge and research experience when interpreting new information.',
+    'elaboration'
+  ],
+
+  // Self-Evaluation
+  [
+    'srl_eval_know',
+    'After finishing a research task, I am often unsure how well I understand the material.',
+    'self_evaluation'
+  ],
+  [
+    'srl_eval_different',
+    'After finishing a research task, I consider whether the task could be approached differently.',
+    'self_evaluation'
+  ],
+  [
+    'srl_eval_learned',
+    'I rarely think about what I have learned after I finish a research task.',
+    'self_evaluation'
+  ],
+
+  // Help Seeking
+  [
+    'srl_help_clarification',
+    'I rarely ask other people or AI for help when I do not understand something.',
+    'help_seeking'
+  ],
+  [
+    'srl_help_identify',
+    'I try to identify people or sources I can ask for help if necessary.',
+    'help_seeking'
+  ],
+  [
+    'srl_help_information',
+    'I ask other people or AI for additional information when I need it.',
+    'help_seeking'
+  ],
+  [
+    'srl_help_own_r',
+    'Even when I am having trouble understanding something, I prefer to work through it on my own rather than asking for help.',
+    'help_seeking'
+  ]
+];
 // Critical-Thinking scale — 6 items (verbatim), shared by pre/post placement
-const CT_ITEMS_LIST = (function () {
-  const pairs = [
-    'ct_credibility', 'I critically evaluate the credibility of the sources of information I encounter.',
-    'ct_evidence', 'I consider whether the evidence presented supports the conclusion being made.',
-    'ct_alternatives', 'I consider alternative explanations before accepting a research claim.',
-    'ct_bias', 'I reflect on possible biases in my own thinking when making judgments.',
-    'ct_assumptions', 'I question the assumptions underlying information or suggestions provided by AI tools.',
-    'ct_compare', 'I compare AI-generated information or recommendations with other sources before relying on them.'
-  ];
-  const out = [];
-  for (let i = 0; i < pairs.length; i += 2) { out.push({ key: pairs[i], label: pairs[i + 1] }); }
-  return out;
-})();
+const CT_ITEMS_LIST = [
+  {
+    key: 'ct_credibility',
+    label:
+      'I critically evaluate the credibility of the sources of information I encounter.'
+  },
+  {
+    key: 'ct_evidence',
+    label:
+      'I sometimes accept a conclusion without carefully checking whether the evidence supports it.'
+  },
+  {
+    key: 'ct_alternatives',
+    label:
+      'I consider alternative explanations before accepting a research claim.'
+  },
+  {
+    key: 'ct_bias',
+    label:
+      'I rarely reflect on possible biases in my own thinking when making judgments.'
+  },
+  {
+    key: 'ct_assumptions',
+    label:
+      'I question the assumptions underlying information or suggestions provided by AI tools.'
+  },
+  {
+    key: 'ct_alternatives_repeat',
+    label:
+      'I consider alternative explanations before accepting a research claim.'
+  },
+  {
+    key: 'ct_compare',
+    label:
+      'I rely on AI-generated information or recommendations without comparing them with other sources.'
+  }
+];
 
 // The critical-thinking items are identical in the pre- and post-task
 // placements, but the introductory wording differs by placement.
@@ -2750,16 +2868,16 @@ function getNumberInputError(input) {
   }
 
   if (input.validity.stepMismatch) {
-  if (input.step === '0.5') {
-    return 'Please enter a value rounded to the nearest half hour.';
-  }
+    if (input.step === '0.5') {
+      return 'Please enter a value rounded to the nearest half hour.';
+    }
 
-  if (input.step === '1') {
-    return 'Please enter a whole number.';
-  }
+    if (input.step === '1') {
+      return 'Please enter a whole number.';
+    }
 
-  return 'Please enter a valid value.';
-}
+    return 'Please enter a valid value.';
+  }
 
   return '';
 }

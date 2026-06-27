@@ -122,7 +122,7 @@ function makeRecord(overrides) {
       srl_task_ownwords: 4, srl_task_change: 3, srl_task_notes: 4, srl_task_examples: 5,
       srl_elab_relate: 4, srl_elab_combine: 3, srl_elab_prior: 4,
       srl_eval_know: 4, srl_eval_different: 3, srl_eval_learned: 4,
-      srl_help_identify: 4, srl_help_guidance: 3, srl_help_beforeown: 4, srl_help_own_r: 5,
+      srl_help_clarification: 3, srl_help_identify: 4, srl_help_information: 4, srl_help_own_r: 5,
       ct_alternatives: 4, ct_assumptions: 3, ct_bias: 4, ct_compare: 5, ct_credibility: 4, ct_evidence: 3,
       font_strength_1: 'Font main claim text.\nWith a newline and “curly quotes” and éèê.',
       font_strength_2: 'Font strength 2 answer',
@@ -183,10 +183,10 @@ function makeRecord(overrides) {
       ]
     },
     ai_message_log: [
-      { paper_id: 'font', success: true },
-      { paper_id: 'font', success: false },
-      { paper_id: 'food', success: true },
-      { paper_id: 'food', success: false }
+      { paper_id: 'font', success: true, prompt: 'What is the main claim of font?' },
+      { paper_id: 'font', success: false, prompt: 'This attempt failed and must be excluded' },
+      { paper_id: 'food', success: true, prompt: 'Summarize the strongest evidence in food.' },
+      { paper_id: 'food', success: false, prompt: 'This one also failed and must be excluded' }
     ],
     logs: {
       font_strength_1: { keystrokes: 120, drafts: [{ value: 'draft snapshot text' }] },
@@ -197,6 +197,13 @@ function makeRecord(overrides) {
       { source_type: 'participant_answer', target_type: 'ai_input' },
       { source_type: 'question', target_type: 'ai_input' },
       { source_type: 'external_or_unknown', target_type: 'participant_answer' }
+    ],
+    copy_events: [
+      { source_type: 'ai_response' },
+      { source_type: 'ai_response' },
+      { source_type: 'participant_answer' },
+      { source_type: 'question' },
+      { source_type: 'external_or_unknown' }
     ],
     revision_log: [
       { question_id: 'font_strength_1' }
@@ -730,6 +737,216 @@ test('buildAiTranscriptRows produces one row per chat exchange with correct succ
   assert.deepEqual(Object.keys(objs[0]), AI_TRANSCRIPT_COLUMNS);
   // The No-AI participant has no chats at all, so contributes zero transcript rows.
   assert.ok(!objs.some((r) => r.participant_id === 'P-TEST-NOAI-0002'));
+});
+
+// ---------------------------------------------------------------------------
+// Approved derived/aggregate columns: SRL subscale means + composite,
+// ct_composite_mean, total_task_duration_ms, AI-use aggregates, and
+// copy/paste aggregates. Uses a clean all-4s SRL/CT record so reverse-coding
+// arithmetic (8 - value) cannot mask a wiring bug: 8 - 4 = 4, so every
+// scored item, subscale mean, and composite mean below should equal exactly
+// 4 when every input is present and valid.
+// ---------------------------------------------------------------------------
+const ALL_SRL_KEYS = [
+  'srl_goal_standards', 'srl_goal_shortlong', 'srl_goal_deadlines',
+  'srl_plan_questions', 'srl_plan_alternatives', 'srl_plan_adapt', 'srl_plan_organize',
+  'srl_task_ownwords', 'srl_task_change', 'srl_task_notes', 'srl_task_examples',
+  'srl_elab_relate', 'srl_elab_combine', 'srl_elab_prior',
+  'srl_eval_know', 'srl_eval_different', 'srl_eval_learned',
+  'srl_help_clarification', 'srl_help_identify', 'srl_help_information', 'srl_help_own_r'
+];
+const ALL_CT_KEYS = ['ct_alternatives', 'ct_assumptions', 'ct_bias', 'ct_compare', 'ct_credibility', 'ct_evidence'];
+
+function srlCtCleanRecord(overrides) {
+  const allFours = {};
+  ALL_SRL_KEYS.forEach((k) => { allFours[k] = 4; });
+  ALL_CT_KEYS.forEach((k) => { allFours[k] = 4; });
+  return makeRecord({
+    responses: Object.assign({}, makeRecord({}).responses, allFours, overrides)
+  });
+}
+
+test('all 21 official SRL fields are represented in the fixture, with no leftover legacy field names', () => {
+  const record = makeRecord({});
+  ALL_SRL_KEYS.forEach((k) => {
+    assert.ok(k in record.responses, k + ' must be present in the fixture responses');
+  });
+  assert.ok(!('srl_help_guidance' in record.responses), 'legacy srl_help_guidance must not be present');
+  assert.ok(!('srl_help_beforeown' in record.responses), 'legacy srl_help_beforeown must not be present');
+});
+
+test('each SRL subscale mean and the composite mean equal 4 when every item is valid', () => {
+  const row = flattenRecord(srlCtCleanRecord({}));
+  ['srl_goal_setting_mean', 'srl_strategic_planning_mean', 'srl_task_strategies_mean',
+    'srl_elaboration_mean', 'srl_self_evaluation_mean', 'srl_help_seeking_mean'].forEach((col) => {
+    assert.equal(row[col], 4, col + ' must equal 4 when every item in the subscale is valid');
+  });
+  assert.equal(row.srl_composite_mean, 4, 'srl_composite_mean must equal 4 when all six subscale means are present');
+});
+
+test('ct_composite_mean equals 4 when all six primary CT items are valid, and ignores ct_alternatives_repeat/attention_check', () => {
+  const record = srlCtCleanRecord({ ct_alternatives_repeat: 1, attention_check: 1 });
+  const row = flattenRecord(record);
+  assert.equal(row.ct_composite_mean, 4);
+});
+
+// ---------------------------------------------------------------------------
+// Reverse-scoring correctness: srl_goal_shortlong, ct_evidence, ct_bias, and
+// ct_compare are all reverse-coded (scored value = 8 - rawValue). Uses
+// asymmetric raw values (1s and 7s) so that a wiring bug -- e.g. a reverse-
+// coded item accidentally being scored as if it were not reverse-coded --
+// would change the resulting mean and be caught here, unlike the all-4s
+// fixture used elsewhere where 8 - 4 = 4 masks any reverse-coding error.
+// ---------------------------------------------------------------------------
+test('SRL and CT aggregates use reverse-scored values correctly', () => {
+  const record = srlCtCleanRecord({
+    srl_goal_standards: 7,
+    srl_goal_shortlong: 1,
+    srl_goal_deadlines: 7,
+
+    ct_credibility: 7,
+    ct_evidence: 1,
+    ct_alternatives: 7,
+    ct_bias: 1,
+    ct_assumptions: 7,
+    ct_compare: 1
+  });
+
+  const row = flattenRecord(record);
+
+  assert.equal(row.srl_goal_setting_mean, 7);
+  assert.equal(row.ct_composite_mean, 7);
+});
+
+test('an SRL subscale mean is blank if any required item is missing or invalid', () => {
+  const record = srlCtCleanRecord({ srl_goal_standards: '' });
+  const row = flattenRecord(record);
+  assert.equal(row.srl_goal_setting_mean, '', 'srl_goal_setting_mean must be blank when srl_goal_standards is missing');
+  // An out-of-range value (e.g. 9) is also invalid and must blank the subscale.
+  const record2 = srlCtCleanRecord({ srl_plan_questions: 9 });
+  const row2 = flattenRecord(record2);
+  assert.equal(row2.srl_strategic_planning_mean, '', 'srl_strategic_planning_mean must be blank when an item is out of the valid 1-7 range');
+});
+
+test('srl_composite_mean is blank if any of the six subscale means is blank', () => {
+  const record = srlCtCleanRecord({ srl_eval_learned: '' });
+  const row = flattenRecord(record);
+  assert.equal(row.srl_self_evaluation_mean, '', 'the affected subscale itself must be blank');
+  assert.equal(row.srl_composite_mean, '', 'srl_composite_mean must be blank when any subscale mean is blank');
+  // The other five subscale means, unaffected, must still be populated.
+  assert.equal(row.srl_goal_setting_mean, 4);
+});
+
+test('ct_composite_mean is blank if any primary CT item is missing or invalid', () => {
+  const record = srlCtCleanRecord({ ct_bias: '' });
+  const row = flattenRecord(record);
+  assert.equal(row.ct_composite_mean, '', 'ct_composite_mean must be blank when a primary CT item is missing');
+});
+
+// ---------------------------------------------------------------------------
+// total_task_duration_ms: sum of duration_ms across the two assigned papers
+// only, blank unless both are present/valid, and a genuine measured 0 must
+// not be treated as missing.
+// ---------------------------------------------------------------------------
+test('total_task_duration_ms sums duration_ms across exactly the two assigned papers', () => {
+  const row = flattenRecord(makeRecord({}));
+  assert.equal(row.total_task_duration_ms, 120000 + 95000);
+});
+
+test('a measured duration of 0 remains valid and is not treated as missing in total_task_duration_ms', () => {
+  const record = makeRecord({
+    timing: { font: { duration_ms: 0 }, food: { duration_ms: 95000 } }
+  });
+  const row = flattenRecord(record);
+  assert.equal(row.total_task_duration_ms, 0 + 95000, 'a real measured 0 must be summed, not treated as missing');
+});
+
+test('total_task_duration_ms is blank when either assigned paper never measured a duration', () => {
+  const record = makeRecord({ timing: { font: { duration_ms: 120000 } } });
+  const row = flattenRecord(record);
+  assert.equal(row.total_task_duration_ms, '', 'must be blank when the food duration was never measured');
+});
+
+// ---------------------------------------------------------------------------
+// AI-use aggregates: any_ai_use, papers_with_any_ai_prompt, and
+// mean_ai_prompt_length, computed only from successful prompts belonging to
+// one of the participant's two assigned papers.
+// ---------------------------------------------------------------------------
+test('any_ai_use, papers_with_any_ai_prompt, and mean_ai_prompt_length are computed from qualifying prompts only', () => {
+  const record = makeRecord({});
+  const row = flattenRecord(record);
+  const qualifying = record.ai_message_log.filter((m) => m.success === true);
+  const expectedMean = Number(
+    (qualifying.reduce((total, m) => total + m.prompt.length, 0) / qualifying.length).toFixed(4)
+  );
+  assert.equal(row.any_ai_use, true);
+  assert.equal(row.papers_with_any_ai_prompt, 2);
+  assert.equal(Number(row.mean_ai_prompt_length), expectedMean);
+});
+
+test('failed prompts are excluded from any_ai_use, papers_with_any_ai_prompt, and mean_ai_prompt_length', () => {
+  const record = makeRecord({
+    ai_message_log: [
+      { paper_id: 'font', success: false, prompt: 'failed prompt one' },
+      { paper_id: 'food', success: false, prompt: 'failed prompt two' }
+    ]
+  });
+  const row = flattenRecord(record);
+  assert.equal(row.any_ai_use, false);
+  assert.equal(row.papers_with_any_ai_prompt, 0);
+  assert.equal(row.mean_ai_prompt_length, '');
+});
+
+test('mean_ai_prompt_length is blank when there are no successful prompts', () => {
+  const record = makeRecord({ ai_message_log: [] });
+  const row = flattenRecord(record);
+  assert.equal(row.mean_ai_prompt_length, '');
+});
+
+test('messages belonging to an unassigned paper are excluded from any_ai_use, papers_with_any_ai_prompt, and mean_ai_prompt_length', () => {
+  // This participant is assigned font + food only; a successful message
+  // logged against "listing" (unassigned) must not count toward any
+  // AI-use aggregate.
+  const record = makeRecord({
+    ai_message_log: [
+      { paper_id: 'listing', success: true, prompt: 'a prompt about an unassigned paper' }
+    ]
+  });
+  const row = flattenRecord(record);
+  assert.equal(row.any_ai_use, false, 'a successful prompt on an unassigned paper must not count as any_ai_use');
+  assert.equal(row.papers_with_any_ai_prompt, 0);
+  assert.equal(row.mean_ai_prompt_length, '');
+});
+
+// ---------------------------------------------------------------------------
+// Copy/paste aggregates derived from copy_events / paste_events.
+// ---------------------------------------------------------------------------
+test('total_copy_count, total_paste_count, and the source/target-specific copy/paste counts are computed correctly', () => {
+  const row = flattenRecord(makeRecord({}));
+  assert.equal(row.total_copy_count, 5);
+  assert.equal(row.ai_response_copy_count, 2);
+  assert.equal(row.answer_copy_count, 1);
+  assert.equal(row.question_copy_count, 1);
+
+  assert.equal(row.total_paste_count, 4);
+  assert.equal(row.total_answer_paste_count, 2, 'target_type participant_answer: the ai_response->answer paste and the external->answer paste');
+  assert.equal(row.total_ai_input_paste_count, 2, 'target_type ai_input: the answer->ai paste and the question->ai paste');
+  assert.equal(row.questions_with_any_paste, 1, 'only one paste event has both target_type participant_answer and a target_id');
+  assert.equal(row.questions_with_ai_to_answer_paste, 1);
+});
+
+test('duplicate paste events into the same response box count once for questions_with_any_paste', () => {
+  const record = makeRecord({
+    paste_events: [
+      { source_type: 'external_or_unknown', target_type: 'participant_answer', target_id: 'font_strength_1' },
+      { source_type: 'external_or_unknown', target_type: 'participant_answer', target_id: 'font_strength_1' },
+      { source_type: 'ai_response', target_type: 'participant_answer', target_id: 'font_strength_1' }
+    ]
+  });
+  const row = flattenRecord(record);
+  assert.equal(row.total_paste_count, 3, 'total_paste_count counts every individual paste event, including duplicates');
+  assert.equal(row.questions_with_any_paste, 1, 'three pastes into the same target_id must count as one distinct question');
+  assert.equal(row.questions_with_ai_to_answer_paste, 1);
 });
 
 // ---------------------------------------------------------------------------
