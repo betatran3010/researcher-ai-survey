@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test:export": "node --test test/export.test.js test/admin-endpoints.test.js"
+    "test:export": "node --test test/export.test.js test/admin-endpoints.test.js test/viewport.test.js"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -226,9 +226,30 @@ const CT_SCALE_NOTE = '1 = Not at all true for me, 7 = Very true for me';
 // (no per-paper custom wording), so the label lives here rather than per
 // paper as in the previous version.
 const STANDARD_Q_DEFS = [
-  { suffix: 'q1', type: 'textarea', label: 'List 3 strengths of this study.' },
-  { suffix: 'q2', type: 'textarea', label: 'List 3 limitations of this study.' },
-  { suffix: 'q3', type: 'textarea', label: 'List 3 areas of improvement or follow-up experiments.' },
+  {
+    suffix: 'strength', type: 'textgroup', label: 'List 3 strengths of this study.',
+    items: [
+      { suffix: 'strength_1', itemLabel: 'Strength 1' },
+      { suffix: 'strength_2', itemLabel: 'Strength 2' },
+      { suffix: 'strength_3', itemLabel: 'Strength 3' }
+    ]
+  },
+  {
+    suffix: 'limitation', type: 'textgroup', label: 'List 3 limitations of this study.',
+    items: [
+      { suffix: 'limitation_1', itemLabel: 'Limitation 1' },
+      { suffix: 'limitation_2', itemLabel: 'Limitation 2' },
+      { suffix: 'limitation_3', itemLabel: 'Limitation 3' }
+    ]
+  },
+  {
+    suffix: 'improvement', type: 'textgroup', label: 'List 3 areas of improvement or follow-up experiments.',
+    items: [
+      { suffix: 'improvement_1', itemLabel: 'Improvement or follow-up experiment 1' },
+      { suffix: 'improvement_2', itemLabel: 'Improvement or follow-up experiment 2' },
+      { suffix: 'improvement_3', itemLabel: 'Improvement or follow-up experiment 3' }
+    ]
+  },
   { suffix: 'convincing', type: 'scale7', label: 'How convincing do you find this paper?' }
 ];
 
@@ -1028,6 +1049,14 @@ function finalizeAboutYou() {
 }
 
 function finalizeStudyTiming(paperId) {
+  // Flush and compute the viewport-tracking measures BEFORE duration_ms is
+  // touched below -- stopViewportTracking() only writes into
+  // DATA.timing[paperId].{pdf_exposure_proportion_5s,navigation_sequence,
+  // navigation_transition_count,backward_transition_count} and never reads
+  // or sets duration_ms/study_end_ts/study_start_ts, so ordering here only
+  // matters for making sure the final (still-open) viewport segment gets
+  // closed out using "now" rather than some later timestamp.
+  stopViewportTracking(paperId);
   if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
   DATA.timing[paperId].study_end_ts = nowTs();
   DATA.timing[paperId].study_end_iso = nowIso();
@@ -1047,6 +1076,7 @@ function markStudyStart(slotId) {
     DATA.timing[paperId].study_start_iso = nowIso();
   }
   currentStudyPaperId = paperId;
+  startViewportTracking(paperId);
 }
 
 // ---------- Required-response validation ----------
@@ -1501,13 +1531,14 @@ function setupRoleYearsField(containerId, fieldName, options) {
   ></div>
 
   <input
-    type="number"
-    id="${fieldName}_years"
-    min="1"
-    step="1"
-    inputmode="numeric"
-    placeholder="Year in PhD program"
-  >
+  type="number"
+  id="${fieldName}_years"
+  min="1"
+  max="10"
+  step="1"
+  inputmode="numeric"
+  placeholder="Year in PhD program"
+>
 `;
     container.insertAdjacentElement('afterend', wrapEl);
   }
@@ -1810,6 +1841,19 @@ function buildStudyPages() {
           </div>
         </div>`;
       }
+      if (def.type === 'textgroup') {
+        const itemsHtml = def.items.map(item => {
+          const itemFieldId = paperId + '_' + item.suffix;
+          return `<div class="list-item-block">
+            <div class="list-item-label">${escapeHtml(item.itemLabel)}</div>
+            <textarea class="list-item-textarea" id="${itemFieldId}" data-logfield="${itemFieldId}" placeholder="Type your response here..."></textarea>
+          </div>`;
+        }).join('');
+        return `<div class="q-card">
+          <div class="q-label">${escapeHtml(label)}</div>
+          ${itemsHtml}
+        </div>`;
+      }
       return `<div class="q-card">
         <div class="q-label">${escapeHtml(label)}</div>
         <textarea id="${fieldId}" data-logfield="${fieldId}" placeholder="Type your response here..."></textarea>
@@ -1907,6 +1951,14 @@ async function renderPDF(url, containerId, paperId) {
       }
     }
     if (paperId) STUDY_PDF_IMAGES[paperId] = capturedImages;
+    // All pages have now been appended to the container, so
+    // pdfWrap-<paperId>.scrollHeight reflects the FINAL, complete content
+    // height. Gate exposure-bucket allocation on this rather than on the
+    // first non-trivial scrollHeight, since each page is rendered and
+    // appended one at a time across real async yields (see the for-loop
+    // above) -- allocating buckets earlier would size them against a
+    // partial (e.g. single-page) height for multi-page papers.
+    if (paperId) markPdfContentReady(paperId);
   } catch (err) {
     console.error('PDF render failed for', url, err);
     container.innerHTML = '<p class="pdf-status-msg">Could not load the paper. Please contact the study team.</p>';
@@ -1931,6 +1983,410 @@ function downscaleCanvasToJpeg(sourceCanvas, maxDimension) {
 
 function getStudyPdfImages(paperId) {
   return STUDY_PDF_IMAGES[paperId] || [];
+}
+
+// ============================================================
+// PDF viewport-tracking measures
+// ------------------------------------------------------------
+// Adapted from two strands of the reading-behavior literature:
+//  - Lagun & Lalmas (2016): cumulative time-in-viewport with a
+//    5-second dwell threshold per content region. Used here as
+//    EXPOSURE_THRESHOLD_MS for pdf_exposure_proportion_5s.
+//  - AOI (Area-of-Interest) Markov-chain navigation models: we
+//    discretize the viewport's vertical position into named
+//    regions and track visits to those regions to compute
+//    navigation_sequence, navigation_transition_count, and
+//    backward_transition_count.
+//  - Lagun & Lalmas (2016) preprocessing requirement: an AOI visit
+//    is only retained in the navigation sequence once its
+//    continuous dwell time reaches MIN_DWELL_MS. This is NOT
+//    optional -- a state a participant passed through for under a
+//    second (e.g. while scrolling past it en route elsewhere) is
+//    not a genuine "visit" to that region and must not appear in
+//    navigation_sequence or count toward navigation_transition_count
+//    / backward_transition_count. See aggregateNavigationSequence()
+//    below for the exact 4-step procedure (aggregate consecutive
+//    same-AOI intervals -> drop any whose total is under
+//    MIN_DWELL_MS -> re-collapse newly-adjacent duplicates).
+//
+// IMPLEMENTATION ADAPTATIONS (ours, specific to this split-panel
+// survey -- NOT specified by the cited papers):
+//  1. The discrete region set (Top/Middle/Bottom/Full/Unclassified/
+//     Unrendered) and the "closest anchor within one viewport
+//     height" tie-break rule used to assign a region are our own
+//     deterministic design choices.
+//  2. Exposure-bucket accumulation excludes time when the tab is
+//     hidden or the window is unfocused (seg.visible/seg.focused
+//     below). This does NOT change duration_ms, which still counts
+//     all elapsed time regardless of visibility/focus -- it only
+//     keeps the exposure measure from crediting time the page could
+//     not actually have been looked at.
+//  3. Exposure is measured over up to MAX_EXPOSURE_BUCKETS equal-
+//     height buckets spanning the full rendered PDF content height
+//     (#pdfWrap-<paperId>.scrollHeight), NOT the scrollable pane
+//     (#paperPane-<paperId>), so the measure is independent of pane
+//     height and consistent across window sizes.
+//  4. The MIN_DWELL_MS filter applies only to navigation_sequence /
+//     navigation_transition_count / backward_transition_count. It
+//     never affects pdf_exposure_proportion_5s, which still credits
+//     a bucket's actual visible/focused milliseconds regardless of
+//     how long any single visit lasted -- a participant who
+//     revisits a region in several short bursts that add up past
+//     EXPOSURE_THRESHOLD_MS has genuinely been exposed to it, even
+//     though none of those bursts individually survives the
+//     navigation-sequence dwell filter.
+//  5. Before the MIN_DWELL_MS aggregation step runs, filterNavigableSegments()
+//     drops any raw segment that was hidden (visible !== true), unfocused
+//     (focused !== true), or not a real content region (Unrendered /
+//     Unclassified). A participant who tabs away or alt-tabs out never gets
+//     that dead time credited as a "visit" to whatever region happened to be
+//     on screen, and indeterminate/not-yet-rendered states never appear in
+//     navigation_sequence either.
+//  6. pdf_exposure_proportion_5s uses a strict > EXPOSURE_THRESHOLD_MS
+//     comparison ("viewport time longer than 5 seconds"), so a bucket
+//     exposed for exactly 5000ms does not count -- only buckets exposed for
+//     more than 5000ms do.
+//  7. navigation_sequence does not include explicit Start/Leave sentinel
+//     markers. The sequence already implicitly begins when markStudyStart()
+//     starts the tracker and ends when finalizeStudyTiming() stops it, so an
+//     explicit "Start"/"Leave" token in the exported string would only
+//     duplicate information already carried by the page-entry/exit timing
+//     fields, without adding anything the AOI/Markov-chain literature itself
+//     requires. This is a deliberate, documented omission, not an oversight.
+//
+// NOT used as primary measures, per spec: raw scroll_event_count and
+// mouse hover are deliberately excluded from this module. Time spent
+// in a viewport region is reported only as an exposure proportion and
+// is never described as proof of attentive reading or comprehension.
+// ============================================================
+
+const EXPOSURE_THRESHOLD_MS = 5000;
+const MAX_EXPOSURE_BUCKETS = 2000;
+const VIEWPORT_HEARTBEAT_MS = 1000;
+const MIN_DWELL_MS = 1000;
+
+const VIEWPORT_TRACKERS = {};
+
+function getPdfViewportRange(paperId) {
+  const pane = document.getElementById('paperPane-' + paperId);
+  const wrap = document.getElementById('pdfWrap-' + paperId);
+  if (!pane || !wrap) return null;
+  const paneRect = pane.getBoundingClientRect();
+  const wrapRect = wrap.getBoundingClientRect();
+  const contentHeight = wrap.scrollHeight;
+  if (!contentHeight) return null;
+  const viewportHeight = pane.clientHeight;
+  let visibleTop = paneRect.top - wrapRect.top;
+  let visibleBottom = visibleTop + viewportHeight;
+  visibleTop = Math.max(0, Math.min(contentHeight, visibleTop));
+  visibleBottom = Math.max(0, Math.min(contentHeight, visibleBottom));
+  return { contentHeight, viewportHeight, visibleTop, visibleBottom };
+}
+
+function classifyAOI(range) {
+  if (!range) return 'Unrendered';
+  const { contentHeight, viewportHeight, visibleTop } = range;
+  const scrollRange = contentHeight - viewportHeight;
+  if (scrollRange <= 0) return 'Full';
+  const anchors = [
+    { name: 'Top', pos: 0 },
+    { name: 'Middle', pos: scrollRange / 2 },
+    { name: 'Bottom', pos: scrollRange }
+  ];
+  let best = null;
+  for (const anchor of anchors) {
+    const dist = Math.abs(visibleTop - anchor.pos);
+    if (!best || dist < best.dist) best = { name: anchor.name, dist };
+  }
+  return best.dist <= viewportHeight ? best.name : 'Unclassified';
+}
+
+function numBucketsFor(contentHeight) {
+  return Math.max(1, Math.min(MAX_EXPOSURE_BUCKETS, Math.ceil(contentHeight)));
+}
+
+function bucketIndexRange(top, bottom, contentHeight, bucketCount) {
+  const bucketHeight = contentHeight / bucketCount;
+  if (bucketHeight <= 0) return { start: 0, end: 0 };
+  const start = Math.max(0, Math.floor(top / bucketHeight));
+  const end = Math.min(bucketCount, Math.ceil(bottom / bucketHeight));
+  return { start, end };
+}
+
+function startViewportTracking(paperId) {
+  if (VIEWPORT_TRACKERS[paperId]) return;
+  const tracker = {
+    contentReady: false,
+    bucketCount: 0,
+    bucketExposedMs: null,
+    rawLog: [],
+    stopped: false,
+    current: {
+      region: 'Unrendered',
+      top: 0,
+      bottom: 0,
+      contentHeight: 0,
+      viewportHeight: 0,
+      startedAt: nowTs(),
+      openedAt: nowTs(),
+      accumulatedMs: 0,
+      visible: document.visibilityState === 'visible',
+      focused: document.hasFocus()
+    },
+    heartbeatHandle: null,
+    listeners: null,
+    resizeObserver: null
+  };
+  VIEWPORT_TRACKERS[paperId] = tracker;
+
+  const onScroll = () => updateViewportSegment(paperId);
+  const onResize = () => updateViewportSegment(paperId);
+  const onVisibility = () => updateViewportSegment(paperId);
+  const onFocus = () => updateViewportSegment(paperId);
+  const onBlur = () => updateViewportSegment(paperId);
+
+  const pane = document.getElementById('paperPane-' + paperId);
+  if (pane) pane.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onResize);
+  document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('focus', onFocus);
+  window.addEventListener('blur', onBlur);
+  tracker.listeners = { pane, onScroll, onResize, onVisibility, onFocus, onBlur };
+
+  if (typeof ResizeObserver !== 'undefined' && pane) {
+    tracker.resizeObserver = new ResizeObserver(() => updateViewportSegment(paperId));
+    tracker.resizeObserver.observe(pane);
+  }
+
+  tracker.heartbeatHandle = setInterval(() => tickSegment(paperId), VIEWPORT_HEARTBEAT_MS);
+}
+
+function markPdfContentReady(paperId) {
+  const tracker = VIEWPORT_TRACKERS[paperId];
+  if (!tracker || tracker.contentReady) return;
+  const wrap = document.getElementById('pdfWrap-' + paperId);
+  const contentHeight = wrap ? wrap.scrollHeight : 0;
+  if (!contentHeight) return;
+  tracker.bucketCount = numBucketsFor(contentHeight);
+  tracker.bucketExposedMs = new Array(tracker.bucketCount).fill(0);
+  tracker.contentReady = true;
+  updateViewportSegment(paperId);
+}
+
+function tickSegment(paperId) {
+  const tracker = VIEWPORT_TRACKERS[paperId];
+  if (!tracker) return;
+  const seg = tracker.current;
+  const now = nowTs();
+  const elapsed = Math.max(0, now - seg.startedAt);
+  seg.startedAt = now;
+  seg.accumulatedMs += elapsed;
+
+  if (!tracker.contentReady || !seg.visible || !seg.focused) return;
+  const wrap = document.getElementById('pdfWrap-' + paperId);
+  const contentHeight = wrap ? wrap.scrollHeight : 0;
+  if (!contentHeight) return;
+  const { start, end } = bucketIndexRange(seg.top, seg.bottom, contentHeight, tracker.bucketCount);
+  for (let i = start; i < end; i += 1) tracker.bucketExposedMs[i] += elapsed;
+}
+
+function updateViewportSegment(paperId) {
+  const tracker = VIEWPORT_TRACKERS[paperId];
+  if (!tracker || tracker.stopped) return;
+  tickSegment(paperId);
+
+  const range = getPdfViewportRange(paperId);
+  const region = tracker.contentReady ? classifyAOI(range) : 'Unrendered';
+  const visible = document.visibilityState === 'visible';
+  const focused = document.hasFocus();
+  const seg = tracker.current;
+
+  const sameRange =
+    Math.abs(seg.top - (range ? range.visibleTop : 0)) < 1 &&
+    Math.abs(seg.bottom - (range ? range.visibleBottom : 0)) < 1;
+  if (seg.region === region && seg.visible === visible && seg.focused === focused && sameRange) {
+    return;
+  }
+
+  closeSegment(paperId);
+  openSegment(paperId, region, range, visible, focused);
+}
+
+// Raw segments are kept rich enough to be independently recomputed/audited
+// (verification-only -- see DATA.viewport_raw_log -- never a primary export
+// field): wall-clock start/end, the duration actually accumulated for this
+// segment, the content/viewport dimensions and visible-range pixels used to
+// classify its AOI, a normalized scroll position, and the visibility/focus
+// state and AOI region itself.
+function closeSegment(paperId) {
+  const tracker = VIEWPORT_TRACKERS[paperId];
+  if (!tracker) return;
+  const seg = tracker.current;
+  const endTs = nowTs();
+  const contentHeight = seg.contentHeight || 0;
+  const viewportHeight = seg.viewportHeight || 0;
+  const scrollRange = contentHeight - viewportHeight;
+  const normalizedPosition = scrollRange > 0
+    ? Math.max(0, Math.min(1, Number((seg.top / scrollRange).toFixed(4))))
+    : null;
+  tracker.rawLog.push({
+    region: seg.region,
+    start_ts: seg.openedAt,
+    end_ts: endTs,
+    duration_ms: Math.round(seg.accumulatedMs),
+    content_height: Math.round(contentHeight),
+    viewport_height: Math.round(viewportHeight),
+    visible_top: Math.round(seg.top),
+    visible_bottom: Math.round(seg.bottom),
+    normalized_position: normalizedPosition,
+    visible: seg.visible,
+    focused: seg.focused
+  });
+}
+
+// Implements the Lagun & Lalmas (2016) preprocessing step required before
+// deriving a navigation sequence from raw, possibly-noisy dwell intervals:
+//   1. (caller) rawLog is already an ordered list of {region, ms} visits.
+//   2. Aggregate consecutive intervals that belong to the SAME AOI into one
+//      continuous visit (sums their durations).
+//   3. Drop any aggregated visit whose total continuous duration is under
+//      MIN_DWELL_MS -- a region passed through too briefly to count as a
+//      real "visit".
+//   4. Re-collapse any AOIs that become adjacent duplicates as a result of
+//      step 3 (e.g. Top, <1s Middle, Top -> after dropping Middle, the two
+//      Top visits are now adjacent and must merge into a single Top).
+// Returns a plain array of region names (already deduplicated/adjacent-
+// collapsed), e.g. ['Top', 'Bottom']. Exported standalone so it can be
+// exercised directly with synthetic intervals in tests.
+function aggregateNavigationSequence(rawLog) {
+  const merged = [];
+  for (const seg of rawLog) {
+    const last = merged[merged.length - 1];
+    if (last && last.region === seg.region) {
+      last.ms += seg.ms;
+    } else {
+      merged.push({ region: seg.region, ms: seg.ms });
+    }
+  }
+
+  const longEnough = merged.filter((visit) => visit.ms >= MIN_DWELL_MS);
+
+  const collapsed = [];
+  for (const visit of longEnough) {
+    if (collapsed.length === 0 || collapsed[collapsed.length - 1] !== visit.region) {
+      collapsed.push(visit.region);
+    }
+  }
+  return collapsed;
+}
+
+// Regions that can ever count as a genuine navigation "visit". Unrendered
+// (no PDF content yet) and Unclassified (could not be confidently assigned
+// to a named region) are transient/indeterminate states, not real AOI
+// visits, so they are excluded here -- before MIN_DWELL_MS aggregation ever
+// runs -- rather than being merged/collapsed like a real region would be.
+const NAVIGABLE_REGIONS = new Set(['Top', 'Middle', 'Bottom', 'Full']);
+
+// Drops raw segments that cannot represent genuine attention to a region:
+// hidden-tab time (visible !== true), unfocused-window time (focused !==
+// true), and Unrendered/Unclassified states. This runs BEFORE
+// aggregateNavigationSequence(), so hidden/unfocused/indeterminate dwell
+// time can never inflate navigation_sequence or the transition counts --
+// matching the same visible/focused gating tickSegment() already applies to
+// pdf_exposure_proportion_5s. Returns plain {region, ms} pairs, the input
+// shape aggregateNavigationSequence() expects.
+function filterNavigableSegments(rawLog) {
+  return rawLog
+    .filter((seg) => seg.visible === true && seg.focused === true && NAVIGABLE_REGIONS.has(seg.region))
+    .map((seg) => ({ region: seg.region, ms: seg.duration_ms }));
+}
+
+// Counts forward/backward transitions across an already-aggregated,
+// already-filtered sequence of region names (see aggregateNavigationSequence
+// above). Backward = a transition that moves to an earlier region in the
+// Top(0) -> Middle(1) -> Bottom(2) reading order.
+function countNavigationTransitions(sequence) {
+  let transitions = 0;
+  let backward = 0;
+  const order = { Top: 0, Middle: 1, Bottom: 2 };
+  for (let i = 1; i < sequence.length; i += 1) {
+    transitions += 1;
+    const prev = sequence[i - 1];
+    const next = sequence[i];
+    if (Object.prototype.hasOwnProperty.call(order, prev) &&
+      Object.prototype.hasOwnProperty.call(order, next) &&
+      order[next] < order[prev]) {
+      backward += 1;
+    }
+  }
+  return { transitions, backward };
+}
+
+function openSegment(paperId, region, range, visible, focused) {
+  const tracker = VIEWPORT_TRACKERS[paperId];
+  if (!tracker) return;
+  const now = nowTs();
+  tracker.current = {
+    region,
+    top: range ? range.visibleTop : 0,
+    bottom: range ? range.visibleBottom : 0,
+    contentHeight: range ? range.contentHeight : 0,
+    viewportHeight: range ? range.viewportHeight : 0,
+    startedAt: now,
+    openedAt: now,
+    accumulatedMs: 0,
+    visible,
+    focused
+  };
+}
+
+function stopViewportTracking(paperId) {
+  const tracker = VIEWPORT_TRACKERS[paperId];
+  if (!tracker || tracker.stopped) return;
+  if (tracker.heartbeatHandle) clearInterval(tracker.heartbeatHandle);
+  // Flush time elapsed since the last 1s heartbeat into the current segment
+  // BEFORE closing it. Without this, a participant who leaves the paper
+  // between heartbeat ticks loses that trailing partial interval entirely --
+  // e.g. a 6-second dwell that ends 900ms after the last tick would credit
+  // only up to the last tick, which can wrongly produce zero exposure for a
+  // dwell that in fact crossed EXPOSURE_THRESHOLD_MS.
+  tickSegment(paperId);
+  closeSegment(paperId);
+  tracker.stopped = true;
+
+  if (tracker.listeners) {
+    const { pane, onScroll, onResize, onVisibility, onFocus, onBlur } = tracker.listeners;
+    if (pane) pane.removeEventListener('scroll', onScroll);
+    window.removeEventListener('resize', onResize);
+    document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('focus', onFocus);
+    window.removeEventListener('blur', onBlur);
+  }
+  if (tracker.resizeObserver) tracker.resizeObserver.disconnect();
+
+  if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
+  const navigable = filterNavigableSegments(tracker.rawLog);
+  const collapsed = aggregateNavigationSequence(navigable);
+  const { transitions, backward } = countNavigationTransitions(collapsed);
+
+  let exposureProportion = '';
+  if (tracker.contentReady && tracker.bucketExposedMs && tracker.bucketExposedMs.length) {
+    // Strict ">" per spec ("viewport time longer than 5 seconds"): a bucket
+    // exposed for exactly EXPOSURE_THRESHOLD_MS does not count.
+    const exposedCount = tracker.bucketExposedMs.reduce(
+      (count, ms) => count + (ms > EXPOSURE_THRESHOLD_MS ? 1 : 0),
+      0
+    );
+    exposureProportion = Number((exposedCount / tracker.bucketExposedMs.length).toFixed(4));
+  }
+
+  DATA.timing[paperId].pdf_exposure_proportion_5s = exposureProportion;
+  DATA.timing[paperId].navigation_sequence = collapsed.join('>');
+  DATA.timing[paperId].navigation_transition_count = transitions;
+  DATA.timing[paperId].backward_transition_count = backward;
+
+  if (!DATA.viewport_raw_log) DATA.viewport_raw_log = {};
+  DATA.viewport_raw_log[paperId] = tracker.rawLog;
 }
 
 // ---------- AI chat panel ----------
@@ -2483,8 +2939,14 @@ function inferQuestionId(questionElement) {
   const card = questionElement.closest('.q-card');
   if (!card) return null;
 
-  const textarea = card.querySelector('textarea[data-logfield]');
-  if (textarea) return textarea.getAttribute('data-logfield');
+  // If the card holds exactly one logged textarea, that's an unambiguous
+  // match. If it holds more than one (e.g. a "List 3..." card with three
+  // separate item textareas under one shared heading), there is no single
+  // correct field to attribute a heading-level copy event to, so we
+  // deliberately return null rather than silently picking the first one.
+  const textareas = card.querySelectorAll('textarea[data-logfield]');
+  if (textareas.length === 1) return textareas[0].getAttribute('data-logfield');
+  if (textareas.length > 1) return null;
 
   const scale = card.querySelector('[data-name]');
   if (scale) return scale.getAttribute('data-name');

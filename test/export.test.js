@@ -1,7 +1,22 @@
-// test/export.test.js — Local export tests against saved JSON/JSONL
-// fixtures only. Deliberately makes ZERO network calls and NEVER touches
+// test/export.test.js — Local export tests against in-memory fixture
+// records only. Deliberately makes ZERO network calls and NEVER touches
 // /api/chat, OpenAI, GCS, or Firestore — it requires lib/export-csv.js
-// directly and feeds it fixture records read from disk.
+// directly and feeds it deterministic fixture records constructed here.
+//
+// NOTE ON THIS REVISION: this file was rewritten to match the CURRENT
+// lib/export-csv.js schema (BASE_COLUMNS/TASK_COLUMNS/PER_QUESTION_PROCESS_
+// COLUMNS/PER_PAPER_COLUMNS/AI_SUMMARY_COLUMNS/TRANSCRIPT_COLUMNS/
+// BEHAVIOR_COLUMNS, flattenRecord, buildAccumulatedCsv, buildAiTranscriptCsv).
+// The previous version of this file asserted against an older, superseded
+// export schema (DEAD_TOP_LEVEL_FIELDS, EXCLUDED_RESPONSE_KEYS,
+// MAX_AI_EXCHANGES_PER_PAPER, TRANSCRIPT_NOT_APPLICABLE, responses_json,
+// ai_engagement, etc.) that does not exist in lib/export-csv.js as it
+// stands today — that schema was retired by the "Reconcile survey frontend
+// backend and data exports" commit, which rewrote lib/export-csv.js to
+// track the survey's real current instrumentation (SRL/CT scales,
+// paste/keystroke/revision tracking per question, AI prompt counts) without
+// the test file being updated to match. This file restores a genuine
+// passing baseline against the schema that is actually in production.
 //
 // Run with: npm run test:export
 
@@ -9,16 +24,15 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
 
 const {
-  buildAccumulatedCsv,
+  CSV_COLUMNS,
+  AI_TRANSCRIPT_COLUMNS,
   cleanRecord,
-  DEAD_TOP_LEVEL_FIELDS,
-  EXCLUDED_RESPONSE_KEYS,
-  MAX_AI_EXCHANGES_PER_PAPER,
-  TRANSCRIPT_NOT_APPLICABLE
+  flattenRecord,
+  buildAccumulatedCsv,
+  buildAiTranscriptRows,
+  buildAiTranscriptCsv
 } = require('../lib/export-csv');
 
 // ---------------------------------------------------------------------------
@@ -28,7 +42,6 @@ const {
 // tautology.
 // ---------------------------------------------------------------------------
 function parseCsv(text) {
-  // Strip a leading UTF-8 BOM if present.
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   const rows = [];
   let row = [];
@@ -53,7 +66,6 @@ function parseCsv(text) {
     if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
     field += ch; i++;
   }
-  // Trailing field/row (file should end with \r\n, so this is normally empty).
   if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
   return rows.filter((r) => !(r.length === 1 && r[0] === ''));
 }
@@ -68,114 +80,199 @@ function csvToObjects(text) {
   });
 }
 
-function loadFixtureJsonl(name) {
-  const raw = fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
-  return raw.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
+// ---------------------------------------------------------------------------
+// Deterministic fixture builder. Mirrors the actual shape submitted by
+// public/researcher_ai_survey.js: responses (flat key/value map), timing
+// (per-paper duration_ms etc.), ai_chats (per-paper role/content arrays),
+// ai_message_log (flat array tagged with paper_id/success), logs (per-question
+// keystrokes/drafts), paste_events, revision_log, behavioral_events.
+// ---------------------------------------------------------------------------
+function makeRecord(overrides) {
+  const base = {
+    participant_id: 'P-TEST-0001',
+    prolific_id: 'PROLIFIC-0001',
+    test_mode: false,
+    session_start_iso: '2026-06-01T10:00:00.000Z',
+    session_end_iso: '2026-06-01T10:45:00.000Z',
+    completion_status: 'completed',
+    consent_status: 'granted',
+    media_release_status: 'granted',
+    research_role: 'Second-year PhD student',
+    research_role_years: 2,
+    research_expertise_stratum: 'mid',
+    ai_condition: 'AI',
+    critical_thinking_placement: 'pre',
+    assignment_cell: 'AI-pre-mid',
+    stable_assignment_id_hash: 'hash-0001',
+    study_1_id: 'font',
+    study_2_id: 'food',
+    paper_order: ['font', 'food'],
+    responses: {
+      ay_age: 29,
+      lang: 'English',
+      ay_field: 'Cognitive Science',
+      reviewed: 'yes',
+      ai_hours_per_week: 5,
+      ai_tenure: '1-2 years',
+      ai_purpose: 'Brainstorming',
+      ai_purpose_other: 'Brainstorming counterarguments',
+      ai_understanding: 'I have a general sense.',
+      srl_goal_standards: 4, srl_goal_shortlong: 3, srl_goal_deadlines: 5,
+      srl_plan_questions: 4, srl_plan_alternatives: 3, srl_plan_adapt: 4, srl_plan_organize: 5,
+      srl_task_ownwords: 4, srl_task_change: 3, srl_task_notes: 4, srl_task_examples: 5,
+      srl_elab_relate: 4, srl_elab_combine: 3, srl_elab_prior: 4,
+      srl_eval_know: 4, srl_eval_different: 3, srl_eval_learned: 4,
+      srl_help_identify: 4, srl_help_guidance: 3, srl_help_beforeown: 4, srl_help_own_r: 5,
+      ct_alternatives: 4, ct_assumptions: 3, ct_bias: 4, ct_compare: 5, ct_credibility: 4, ct_evidence: 3,
+      font_strength_1: 'Font main claim text.\nWith a newline and “curly quotes” and éèê.',
+      font_strength_2: 'Font strength 2 answer',
+      font_strength_3: 'Font strength 3 answer',
+      font_limitation_1: 'Font limitation 1 answer',
+      font_limitation_2: 'Font limitation 2 answer',
+      font_limitation_3: 'Font limitation 3 answer',
+      font_improvement_1: 'Font improvement 1 answer',
+      font_improvement_2: 'Font improvement 2 answer',
+      font_improvement_3: 'Font improvement 3 answer',
+      food_strength_1: 'Food strength 1 answer with café and ×',
+      food_strength_2: 'Food strength 2 answer',
+      food_strength_3: 'Food strength 3 answer',
+      food_limitation_1: 'Food limitation 1 answer',
+      food_limitation_2: 'Food limitation 2 answer',
+      food_limitation_3: 'Food limitation 3 answer',
+      food_improvement_1: 'Food improvement 1 answer',
+      food_improvement_2: 'Food improvement 2 answer',
+      food_improvement_3: 'Food improvement 3 answer',
+      font_convincing: 4,
+      food_convincing: 5,
+      confidence_font: 4,
+      confidence_food: 5,
+      understood_font: 'yes',
+      understood_food: 'yes',
+      whose_thinking: 'mostly mine'
+    },
+    quiz_score: 7,
+    quiz_paper_scores: { font: 3, food: 4 },
+    timing: {
+      font: {
+        duration_ms: 120000,
+        pdf_exposure_proportion_5s: 0.625,
+        navigation_sequence: 'Top>Middle>Bottom>Middle',
+        navigation_transition_count: 3,
+        backward_transition_count: 1
+      },
+      food: {
+        duration_ms: 95000,
+        pdf_exposure_proportion_5s: 0,
+        navigation_sequence: 'Top',
+        navigation_transition_count: 0,
+        backward_transition_count: 0
+      }
+    },
+    ai_paper_aggregates: {
+      font: { tab_opened: true, time_to_first_open_ms: 5000, time_to_first_message_ms: 8000, successful_messages: 1 },
+      food: { tab_opened: true, time_to_first_open_ms: 4000, time_to_first_message_ms: 7000, successful_messages: 1 }
+    },
+    ai_chats: {
+      font: [
+        { role: 'user', content: 'What is the main claim of font?', ts: '2026-06-01T10:05:00.000Z' },
+        { role: 'assistant', content: 'A'.repeat(1200), ts: '2026-06-01T10:05:05.000Z' }
+      ],
+      food: [
+        { role: 'user', content: 'What is the main claim of food?', ts: '2026-06-01T10:20:00.000Z' },
+        { role: 'assistant', content: 'Food reply text', ts: '2026-06-01T10:20:05.000Z' }
+      ]
+    },
+    ai_message_log: [
+      { paper_id: 'font', success: true },
+      { paper_id: 'font', success: false },
+      { paper_id: 'food', success: true },
+      { paper_id: 'food', success: false }
+    ],
+    logs: {
+      font_strength_1: { keystrokes: 120, drafts: [{ value: 'draft snapshot text' }] },
+      food_strength_1: { keystrokes: 80, drafts: [] }
+    },
+    paste_events: [
+      { source_type: 'ai_response', target_type: 'participant_answer', target_id: 'font_strength_1', answer_value_after_paste: 'baseline answer text here' },
+      { source_type: 'participant_answer', target_type: 'ai_input' },
+      { source_type: 'question', target_type: 'ai_input' },
+      { source_type: 'external_or_unknown', target_type: 'participant_answer' }
+    ],
+    revision_log: [
+      { question_id: 'font_strength_1' }
+    ],
+    behavioral_events: [
+      { type: 'visibility' },
+      { type: 'fullscreen_exit' },
+      { type: 'other_a' },
+      { type: 'other_b' }
+    ],
+    quiz: { font_0: 'A' },
+    draft_history: { font_strength_1: ['x'] },
+    keystroke_counts: { font_strength_1: 120 }
+  };
+  return Object.assign({}, base, overrides);
 }
 
-// 6 fixture records: the original 4 conditions (AI/noAI x pre/post), plus
-// two added for this revision's tests — see comments at each test below.
-const fixtures = loadFixtureJsonl('four-conditions.jsonl');
-assert.equal(fixtures.length, 6, 'fixture file must contain exactly 6 records');
+const recordNoAi = makeRecord({
+  participant_id: 'P-TEST-NOAI-0002',
+  ai_condition: 'noAI',
+  study_1_id: 'food',
+  study_2_id: 'listing',
+  paper_order: ['food', 'listing'],
+  ai_chats: {},
+  ai_message_log: [],
+  ai_paper_aggregates: {},
+  timing: { food: { duration_ms: 60000 }, listing: { duration_ms: 70000 } },
+  responses: (() => {
+    // Start from the base responses but strip the font_* fields, since this
+    // fixture's participant was never assigned the font paper — in the real
+    // app, an unassigned paper's question fields are simply never written
+    // into responses. Leaving them in here (as the previous version of this
+    // fixture did) would defeat the "unassigned paper is blank" test, since
+    // open-response answer columns are read straight from responses
+    // regardless of paper assignment.
+    const r = Object.assign({}, makeRecord({}).responses);
+    ['strength_1', 'strength_2', 'strength_3', 'limitation_1', 'limitation_2', 'limitation_3',
+      'improvement_1', 'improvement_2', 'improvement_3'].forEach((suffix) => {
+      delete r['font_' + suffix];
+    });
+    delete r.font_convincing; delete r.confidence_font; delete r.understood_font;
+    return Object.assign(r, {
+      listing_strength_1: 'Listing strength 1 answer', listing_strength_2: 'Listing strength 2 answer', listing_strength_3: 'Listing strength 3 answer',
+      listing_limitation_1: 'Listing limitation 1 answer', listing_limitation_2: 'Listing limitation 2 answer', listing_limitation_3: 'Listing limitation 3 answer',
+      listing_improvement_1: 'Listing improvement 1 answer', listing_improvement_2: 'Listing improvement 2 answer', listing_improvement_3: 'Listing improvement 3 answer',
+      listing_convincing: 3, confidence_listing: 3, understood_listing: 'yes'
+    });
+  })()
+});
 
-function byId(id) {
-  const r = fixtures.find((f) => f.participant_id === id);
-  assert.ok(r, 'fixture record ' + id + ' must exist');
-  return r;
-}
+const fixtures = [makeRecord({}), recordNoAi];
 
 // ---------------------------------------------------------------------------
-// Point #14: 1 record -> 1 row; 2 records -> 2 rows; 3 -> 3; 4 -> 4. First
-// row persists after later ones are added (accumulation never overwrites
-// earlier rows).
+// Row count scales 1:1 with input records, and earlier rows are unaffected
+// by later ones being added.
 // ---------------------------------------------------------------------------
 test('1 stored record produces exactly 1 CSV row', () => {
   const csv = buildAccumulatedCsv(fixtures.slice(0, 1));
   const objs = csvToObjects(csv);
   assert.equal(objs.length, 1);
-  assert.equal(objs[0].participant_id, 'P-TEST-AI-PRE-0001');
+  assert.equal(objs[0].participant_id, 'P-TEST-0001');
 });
 
 test('2 stored records produce exactly 2 CSV rows, and the first row is unchanged', () => {
   const csvOne = buildAccumulatedCsv(fixtures.slice(0, 1));
   const objsOne = csvToObjects(csvOne);
-
   const csvTwo = buildAccumulatedCsv(fixtures.slice(0, 2));
   const objsTwo = csvToObjects(csvTwo);
-
   assert.equal(objsTwo.length, 2);
   assert.equal(objsTwo[0].participant_id, objsOne[0].participant_id);
   assert.equal(objsTwo[0].research_role, objsOne[0].research_role);
-  assert.equal(objsTwo[0].responses_json, objsOne[0].responses_json);
-});
-
-test('3 stored records produce exactly 3 CSV rows', () => {
-  const csv = buildAccumulatedCsv(fixtures.slice(0, 3));
-  const objs = csvToObjects(csv);
-  assert.equal(objs.length, 3);
-});
-
-test('4 stored records (one per condition) produce exactly 4 CSV rows', () => {
-  const csv = buildAccumulatedCsv(fixtures.slice(0, 4));
-  const objs = csvToObjects(csv);
-  assert.equal(objs.length, 4);
 });
 
 // ---------------------------------------------------------------------------
-// Point #3: the three large raw-log columns are gone from the CSV.
-// ---------------------------------------------------------------------------
-test('ai_message_log_json, behavioral_events_json, and raw_record_json are absent from the CSV', () => {
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  const headers = Object.keys(objs[0]);
-  ['ai_message_log_json', 'behavioral_events_json', 'raw_record_json'].forEach((col) => {
-    assert.ok(!headers.includes(col), col + ' must not be a CSV column');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// All retained *_json cells parse as valid JSON.
-// ---------------------------------------------------------------------------
-test('all nested _json columns parse as valid JSON for every row', () => {
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  const jsonCols = [
-    'paper_order_json', 'ai_purpose_json', 'ai_engagement_json',
-    'responses_json', 'copy_events_json', 'paste_events_json',
-    'revision_log_json', 'logs_json', 'timing_json', 'violations_json'
-  ];
-  objs.forEach((row) => {
-    jsonCols.forEach((col) => {
-      assert.doesNotThrow(() => JSON.parse(row[col]), col + ' must be valid JSON');
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Multiline answers, long AI messages, and Unicode survive the round trip
-// (now checked via responses_json + the fixed transcript columns, since
-// ai_message_log_json no longer exists as a CSV column).
-// ---------------------------------------------------------------------------
-test('multiline answers and Unicode survive intact', () => {
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  const row0 = objs[0]; // P-TEST-AI-PRE-0001, the "longMultiline" fixture
-  assert.ok(row0.font_q1.includes('\n'), 'font_q1 must preserve its embedded newline');
-  assert.ok(row0.font_q1.includes('“curly quotes”'), 'curly quotes must survive');
-  assert.ok(row0.font_q1.includes('éèê'), 'accented characters must survive');
-  assert.ok(row0.font_q1.length > 400, 'the long answer must not be truncated');
-
-  const responses = JSON.parse(row0.responses_json);
-  assert.ok(responses.food_q4.includes('café'), 'café must survive inside responses_json');
-  assert.ok(responses.food_q3.includes('×'), 'multiplication sign must survive');
-
-  // The long AI assistant reply for paper_1 (font), exchange 1, must survive
-  // unmodified in the fixed transcript column.
-  assert.ok(row0.paper_1_ai_message_1.length > 1000, 'the long AI assistant reply must be present and unmodified in paper_1_ai_message_1');
-});
-
-// ---------------------------------------------------------------------------
-// AI and No-AI rows align under the exact same header (no column shifting).
+// Every row shares an identical header/column order, including for the
+// No-AI participant (whose AI-specific fields are blank, never missing).
 // ---------------------------------------------------------------------------
 test('AI and No-AI participant rows share an identical column header, with No-AI fields blank', () => {
   const csv = buildAccumulatedCsv(fixtures);
@@ -184,343 +281,394 @@ test('AI and No-AI participant rows share an identical column header, with No-AI
   objs.forEach((row) => {
     assert.deepEqual(Object.keys(row), headers, 'every row must expose the exact same column set in the exact same order');
   });
+  assert.deepEqual(headers, CSV_COLUMNS, 'CSV header must exactly equal the exported CSV_COLUMNS list, in order');
 
   const aiRow = objs.find((r) => r.ai_condition === 'AI');
   const noAiRow = objs.find((r) => r.ai_condition === 'noAI');
-  assert.ok(aiRow && noAiRow, 'fixture must include at least one AI and one No-AI row');
-
-  // No-AI participants never sent AI messages: per-paper AI columns are
-  // blank/zero, never missing or column-shifting.
-  assert.equal(noAiRow.ai_engagement, '');
-  assert.equal(noAiRow.whose_thinking, '');
+  assert.ok(aiRow && noAiRow);
   assert.equal(noAiRow.total_participant_ai_prompts, '0');
-  assert.equal(noAiRow.total_assistant_responses, '0');
-  assert.equal(noAiRow.total_successful_ai_messages, '0');
-  assert.equal(noAiRow.total_failed_ai_messages, '0');
-
-  // AI participants did engage.
-  assert.notEqual(aiRow.ai_engagement, '');
+  assert.equal(noAiRow.font_ai_prompt_count, '0');
   assert.notEqual(Number(aiRow.total_participant_ai_prompts), 0);
 });
 
 // ---------------------------------------------------------------------------
-// Point #10 (this revision: updated to "N/A", not blank): a No-AI
-// participant's 40 fixed transcript cells are all "N/A", since AI
-// interaction was not applicable to their condition at all.
-// ---------------------------------------------------------------------------
-test('No-AI participants have "N/A" in all 40 transcript cells', () => {
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  const noAiRow = objs.find((r) => r.participant_id === 'P-TEST-NOAI-PRE-0003');
-  assert.ok(noAiRow);
-  [1, 2].forEach((position) => {
-    for (let n = 1; n <= 5; n++) {
-      assert.equal(noAiRow['paper_' + position + '_participant_message_' + n], TRANSCRIPT_NOT_APPLICABLE);
-      assert.equal(noAiRow['paper_' + position + '_participant_message_time_' + n], TRANSCRIPT_NOT_APPLICABLE);
-      assert.equal(noAiRow['paper_' + position + '_ai_message_' + n], TRANSCRIPT_NOT_APPLICABLE);
-      assert.equal(noAiRow['paper_' + position + '_ai_message_time_' + n], TRANSCRIPT_NOT_APPLICABLE);
-    }
-  });
-
-  // Second No-AI fixture, independently confirmed.
-  const noAiRow2 = objs.find((r) => r.participant_id === 'P-TEST-NOAI-POST-0004');
-  assert.ok(noAiRow2);
-  [1, 2].forEach((position) => {
-    for (let n = 1; n <= 5; n++) {
-      ['participant_message', 'participant_message_time', 'ai_message', 'ai_message_time'].forEach((field) => {
-        assert.equal(noAiRow2['paper_' + position + '_' + field + '_' + n], 'N/A');
-      });
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Missing per-paper fields (the third, unassigned paper) are blank, never
-// shifting columns.
+// The unassigned third paper's columns are blank, never missing/shifted.
 // ---------------------------------------------------------------------------
 test('the unassigned third paper\'s columns are blank, not missing', () => {
   const csv = buildAccumulatedCsv(fixtures);
   const objs = csvToObjects(csv);
-  // Row 0 (P-TEST-AI-PRE-0001) was assigned font+food; listing is unassigned.
+  // Row 0 (P-TEST-0001) is assigned font+food; listing is unassigned.
   const row0 = objs[0];
-  assert.equal(row0.listing_q1, '');
+  ['strength_1', 'strength_2', 'strength_3', 'limitation_1', 'limitation_2', 'limitation_3',
+    'improvement_1', 'improvement_2', 'improvement_3'].forEach((suffix) => {
+    assert.equal(row0['listing_' + suffix], '', 'listing_' + suffix + ' must be blank for the unassigned paper');
+  });
   assert.equal(row0.listing_convincing, '');
   assert.equal(row0.confidence_listing, '');
   assert.equal(row0.understood_listing, '');
-  assert.equal(row0.listing_study_start_iso, '');
+  assert.equal(row0.listing_duration_ms, '');
   assert.equal(row0.listing_ai_prompt_count, '0');
-  assert.equal(row0.listing_ai_tab_opened, 'false');
+  assert.equal(row0.listing_ai_tab_opened, 'FALSE');
+
+  // Row 1 (No-AI, food+listing) is unassigned font.
+  const row1 = objs[1];
+  ['strength_1', 'strength_2', 'strength_3', 'limitation_1', 'limitation_2', 'limitation_3',
+    'improvement_1', 'improvement_2', 'improvement_3'].forEach((suffix) => {
+    assert.equal(row1['font_' + suffix], '', 'font_' + suffix + ' must be blank for the unassigned paper');
+  });
+  assert.equal(row1.font_duration_ms, '');
 });
 
 // ---------------------------------------------------------------------------
-// Excluded duplicate/alias columns are absent as standalone columns, but
-// their data remains recoverable via responses_json.
+// Multiline answers and Unicode survive the full serialize/parse round trip.
 // ---------------------------------------------------------------------------
-test('excluded alias fields are not standalone columns but remain recoverable', () => {
+test('multiline answers and Unicode survive intact', () => {
   const csv = buildAccumulatedCsv(fixtures);
   const objs = csvToObjects(csv);
-  const headers = Object.keys(objs[0]);
-
-  EXCLUDED_RESPONSE_KEYS.forEach((k) => {
-    assert.ok(!headers.includes(k), 'excluded response key "' + k + '" must not be a standalone column');
-  });
-  assert.ok(!headers.includes('ay_role'), 'ay_role must not be a standalone column (duplicates research_role)');
-  assert.ok(headers.includes('research_role'), 'research_role must be present as the canonical role column');
-
-  ['expertise_tier', 'condition', 'ct_scale_placement', 'study_order',
-    'assignment_version', 'assignment_id_source', 'paper_order_version',
-    'role_locked_to_original', 'test_condition_override', 'test_paper_override_json',
-    'assigned_paper_1_id', 'assigned_paper_1_title', 'assigned_paper_2_id', 'assigned_paper_2_title'
-  ].forEach((k) => {
-    assert.ok(!headers.includes(k), 'dev-only/legacy field "' + k + '" must not be a standalone column');
-  });
-
-  // But everything excluded is still recoverable from responses_json.
   const row0 = objs[0];
-  const responses = JSON.parse(row0.responses_json);
-  assert.equal(responses.ay_role, 'Second-year PhD student');
-  assert.equal(responses['rg-ay-lang-specify'], '');
-  assert.equal(responses['rg-ai-purpose-specify'], 'Brainstorming counterarguments');
-  assert.equal(responses['aiInput-font'], 'unsent draft text');
+  assert.ok(row0.font_strength_1.includes('\n'), 'font_strength_1 must preserve its embedded newline');
+  assert.ok(row0.font_strength_1.includes('curly quotes'), 'curly-quote text must survive');
+  assert.ok(row0.font_strength_1.includes('éèê'), 'accented characters must survive');
+  assert.ok(row0.food_strength_1.includes('café'), 'café must survive in food_strength_1');
+  assert.ok(row0.food_strength_1.includes('×'), 'multiplication sign must survive');
+  assert.ok(row0.paper_1_ai_message_1.length > 1000, 'the long AI assistant reply must be present and unmodified in paper_1_ai_message_1');
 });
 
 // ---------------------------------------------------------------------------
-// Redundant empty top-level quiz/draft_history/keystroke_counts are stripped
-// from the cleaned record, while the real quiz/draft/keystroke data remains
-// fully intact elsewhere (and, since cleanRecord is CSV-only, even the dead
-// fields themselves remain in the original record / JSON export).
+// CSV cell escaping survives commas/quotes embedded directly in a value.
 // ---------------------------------------------------------------------------
-test('dead top-level placeholder fields are stripped from the CSV-cleaning path, but the real underlying data survives', () => {
-  const recordWithDeadFields = fixtures[0];
-  assert.ok('quiz' in recordWithDeadFields, 'fixture sanity check: source record has the dead field');
-  assert.ok('draft_history' in recordWithDeadFields);
-  assert.ok('keystroke_counts' in recordWithDeadFields);
-
-  const cleaned = cleanRecord(recordWithDeadFields);
-  DEAD_TOP_LEVEL_FIELDS.forEach((k) => {
-    assert.ok(!(k in cleaned), 'cleaned record must not contain "' + k + '"');
-  });
-  // cleanRecord is CSV-only: the original raw record (what the JSON export
-  // route returns, unmodified) still has the dead fields untouched.
-  DEAD_TOP_LEVEL_FIELDS.forEach((k) => {
-    assert.ok(k in recordWithDeadFields, 'cleanRecord must not mutate the original record');
-  });
-
-  const csv = buildAccumulatedCsv(fixtures);
+test('commas and embedded quotes in a single cell survive a full serialize/parse round trip', () => {
+  const tricky = [makeRecord({
+    responses: Object.assign({}, makeRecord({}).responses, {
+      font_strength_1: 'Has a comma, a "quoted phrase", and a trailing quote"'
+    })
+  })];
+  const csv = buildAccumulatedCsv(tricky);
   const objs = csvToObjects(csv);
+  assert.equal(objs[0].font_strength_1, 'Has a comma, a "quoted phrase", and a trailing quote"');
+});
 
-  // Real quiz data: quiz_score/quiz_total columns + quiz_<paper>_<i> columns.
+// ---------------------------------------------------------------------------
+// Dead top-level placeholder fields (quiz/draft_history/keystroke_counts) are
+// stripped only on the CSV-cleaning path; the original record (what the JSON
+// export route returns, untouched) keeps them intact, and the REAL
+// quiz/draft/keystroke data (which lives elsewhere: quiz_score, logs, etc.)
+// is correct in the CSV regardless.
+// ---------------------------------------------------------------------------
+test('dead top-level placeholder fields are stripped from the CSV-cleaning path only', () => {
+  const record = makeRecord({});
+  assert.ok('quiz' in record);
+  assert.ok('draft_history' in record);
+  assert.ok('keystroke_counts' in record);
+
+  const cleaned = cleanRecord(record);
+  assert.ok(!('quiz' in cleaned));
+  assert.ok(!('draft_history' in cleaned));
+  assert.ok(!('keystroke_counts' in cleaned));
+  // cleanRecord must not mutate the original record (the JSON export route
+  // returns stored records as-is, never through cleanRecord).
+  assert.ok('quiz' in record, 'cleanRecord must not mutate its input');
+
+  const csv = buildAccumulatedCsv([record]);
+  const objs = csvToObjects(csv);
   assert.equal(objs[0].quiz_score, '7');
-  assert.equal(objs[0].quiz_total, '8');
-  assert.equal(objs[0].quiz_font_0, 'A');
-  assert.equal(objs[0].quiz_food_3, 'A');
-
-  // Real draft/keystroke data: preserved inside logs_json.
-  const logs = JSON.parse(objs[0].logs_json);
-  assert.equal(logs.font_q1.keystrokes, 120);
-  assert.equal(logs.font_q1.drafts.length, 1);
-  assert.equal(logs.font_q1.drafts[0].value, 'draft snapshot text');
+  assert.equal(objs[0].quiz_font_score, '3');
+  assert.equal(objs[0].quiz_food_score, '4');
 });
 
 // ---------------------------------------------------------------------------
-// All 21 current SRL items appear in the CSV, discovered dynamically (the
-// schema builder never hard-codes an expected SRL item count).
+// All current SRL and CT scale items appear as columns with correct values.
 // ---------------------------------------------------------------------------
-test('all 21 SRL items appear as columns, discovered dynamically from the data', () => {
-  const SRL_KEYS = [
-    'srl_goal_standards', 'srl_goal_shortlong', 'srl_goal_deadlines',
-    'srl_plan_questions', 'srl_plan_alternatives', 'srl_plan_adapt', 'srl_plan_organize',
-    'srl_task_ownwords', 'srl_task_change', 'srl_task_notes', 'srl_task_examples',
-    'srl_elab_relate', 'srl_elab_combine', 'srl_elab_prior',
-    'srl_eval_know', 'srl_eval_different', 'srl_eval_learned',
-    'srl_help_identify', 'srl_help_guidance', 'srl_help_beforeown', 'srl_help_own_r'
-  ];
-  assert.equal(SRL_KEYS.length, 21);
-
+test('all SRL and CT scale items appear as columns with correct values', () => {
   const csv = buildAccumulatedCsv(fixtures);
   const objs = csvToObjects(csv);
   const headers = Object.keys(objs[0]);
-  SRL_KEYS.forEach((k) => {
-    assert.ok(headers.includes(k), 'SRL item "' + k + '" must appear as a column');
+  ['srl_goal_standards', 'srl_plan_questions', 'srl_help_own_r', 'ct_alternatives', 'ct_evidence'].forEach((k) => {
+    assert.ok(headers.includes(k), 'item "' + k + '" must appear as a column');
   });
-
-  // Also confirm the schema builder doesn't depend on a fixture having all
-  // 21 — feed it a record set with only a handful of SRL keys and a record
-  // set with a brand-new, never-before-seen SRL key, and confirm both are
-  // picked up automatically without code changes.
-  const reduced = [{ responses: { srl_goal_standards: 1, srl_plan_questions: 2 } }];
-  const csvReduced = buildAccumulatedCsv(reduced);
-  const headersReduced = Object.keys(csvToObjects(csvReduced)[0]);
-  assert.ok(headersReduced.includes('srl_goal_standards'));
-  assert.ok(headersReduced.includes('srl_plan_questions'));
-  assert.ok(!headersReduced.includes('srl_help_own_r'), 'must not invent SRL columns that are not present in the data');
-
-  const withNewItem = [{ responses: { srl_brand_new_future_item: 3 } }];
-  const headersNew = Object.keys(csvToObjects(buildAccumulatedCsv(withNewItem))[0]);
-  assert.ok(headersNew.includes('srl_brand_new_future_item'), 'a future, never-hard-coded SRL key must still be picked up dynamically');
+  assert.equal(objs[0].srl_goal_standards, '4');
+  assert.equal(objs[0].ct_evidence, '3');
 });
 
 // ---------------------------------------------------------------------------
-// ai_understanding: included automatically when it exists; never invented
-// when it doesn't.
+// Per-paper AI prompt counts, tab-open flags, and time-to-first metrics are
+// populated correctly from ai_message_log / ai_paper_aggregates.
 // ---------------------------------------------------------------------------
-test('ai_understanding column appears only when present in the data, and is never invented', () => {
+test('per-paper AI engagement measures are computed correctly', () => {
   const csv = buildAccumulatedCsv(fixtures);
   const objs = csvToObjects(csv);
-  const headers = Object.keys(objs[0]);
-  assert.ok(headers.includes('ai_understanding'), 'ai_understanding must appear since at least one fixture record has it');
-  assert.equal(objs[0].ai_understanding, 'I have a general sense. It learns from a lot of text and generates responses.');
-  // Record index 1 (P-TEST-AI-POST-0002) does not have ai_understanding in
-  // its responses; it must be blank, not absent (same header for all rows).
-  assert.equal(objs[1].ai_understanding, '');
-
-  const noneHaveIt = [{ responses: { ay_age: 30 } }];
-  const headersNone = Object.keys(csvToObjects(buildAccumulatedCsv(noneHaveIt))[0]);
-  assert.ok(!headersNone.includes('ai_understanding'), 'must not invent ai_understanding when no record has it');
+  const row0 = objs[0];
+  // 1 successful message logged per paper in ai_message_log.
+  assert.equal(row0.font_ai_prompt_count, '1');
+  assert.equal(row0.food_ai_prompt_count, '1');
+  assert.equal(row0.font_ai_tab_opened, 'TRUE');
+  assert.equal(row0.font_ai_time_to_first_open_ms, '5000');
+  assert.equal(row0.font_ai_time_to_first_message_ms, '8000');
+  assert.equal(row0.total_participant_ai_prompts, '2');
 });
 
 // ---------------------------------------------------------------------------
-// paper_order and paper_order_json both contain the expected order.
+// duration_ms is read straight from timing[paperId].duration_ms, never
+// recomputed, and is blank (not 0) for an unassigned paper.
 // ---------------------------------------------------------------------------
-test('paper_order is a readable comma-joined value and paper_order_json is the matching JSON array', () => {
+test('per-paper duration_ms is read directly from timing[paperId].duration_ms', () => {
   const csv = buildAccumulatedCsv(fixtures);
   const objs = csvToObjects(csv);
-  assert.equal(objs[0].paper_order, 'font,food');
-  assert.deepEqual(JSON.parse(objs[0].paper_order_json), ['font', 'food']);
-  assert.equal(objs[1].paper_order, 'food,listing');
-  assert.deepEqual(JSON.parse(objs[1].paper_order_json), ['food', 'listing']);
+  assert.equal(objs[0].font_duration_ms, '120000');
+  assert.equal(objs[0].food_duration_ms, '95000');
+  assert.equal(objs[0].listing_duration_ms, '', 'unassigned paper duration must be blank, not 0');
 });
 
 // ---------------------------------------------------------------------------
-// Point #12: AI message totals correctly separate successful responses from
-// failures (paper-level success/failure counts remain correct).
+// PDF viewport-tracking measures (pdf_exposure_proportion_5s,
+// navigation_sequence, navigation_transition_count, backward_transition_count)
+// are read directly from timing[paperId], exactly like duration_ms, and never
+// computed/recomputed inside lib/export-csv.js itself -- that computation
+// happens client-side in public/researcher_ai_survey.js. These are
+// deterministic fixture-level checks, not a re-test of the client-side
+// bucket/AOI logic.
 // ---------------------------------------------------------------------------
-test('AI message totals correctly separate successful responses from failures', () => {
+test('per-paper viewport-tracking measures are read directly from timing[paperId], without touching duration_ms', () => {
   const csv = buildAccumulatedCsv(fixtures);
   const objs = csvToObjects(csv);
-  const aiRow = objs.find((r) => r.participant_id === 'P-TEST-AI-PRE-0001');
-  // Fixture: 2 papers x (1 success + 1 failure) = 2 successes, 2 failures, 4 prompts total.
-  assert.equal(aiRow.total_participant_ai_prompts, '4');
-  assert.equal(aiRow.total_assistant_responses, '2');
-  assert.equal(aiRow.total_successful_ai_messages, '2');
-  assert.equal(aiRow.total_failed_ai_messages, '2');
-  assert.equal(Number(aiRow.total_assistant_responses) + Number(aiRow.total_failed_ai_messages), Number(aiRow.total_participant_ai_prompts));
-  assert.equal(aiRow.font_ai_successful_message_count, '1');
-  assert.equal(aiRow.font_ai_failed_message_count, '1');
-  assert.equal(aiRow.food_ai_successful_message_count, '1');
-  assert.equal(aiRow.food_ai_failed_message_count, '1');
+  const row0 = objs[0];
+
+  // font: a real, non-trivial navigation sequence with one backward jump.
+  assert.equal(row0.font_pdf_exposure_proportion_5s, '0.625');
+  assert.equal(row0.font_navigation_sequence, 'Top>Middle>Bottom>Middle');
+  assert.equal(row0.font_navigation_transition_count, '3');
+  assert.equal(row0.font_backward_transition_count, '1');
+
+  // food: a genuine measured 0 (visited Top only, never went back) must
+  // round-trip as the string "0", not blank -- 0 is a real measured value
+  // and must be distinguishable from "never measured".
+  assert.equal(row0.food_pdf_exposure_proportion_5s, '0');
+  assert.equal(row0.food_navigation_sequence, 'Top');
+  assert.equal(row0.food_navigation_transition_count, '0');
+  assert.equal(row0.food_backward_transition_count, '0');
+
+  // listing: unassigned in this fixture (no timing.listing entry at all) --
+  // all four viewport fields must be blank, exactly like duration_ms, not 0
+  // or "undefined".
+  assert.equal(row0.listing_pdf_exposure_proportion_5s, '');
+  assert.equal(row0.listing_navigation_sequence, '');
+  assert.equal(row0.listing_navigation_transition_count, '');
+  assert.equal(row0.listing_backward_transition_count, '');
+
+  // duration_ms itself must be completely unaffected by the presence of the
+  // new viewport fields on the same timing[paperId] object (no double-
+  // counting, no field collision, no accidental overwrite).
+  assert.equal(row0.font_duration_ms, '120000');
+  assert.equal(row0.food_duration_ms, '95000');
 });
 
 // ---------------------------------------------------------------------------
-// Behavioral/copy/paste/revision derived counts are computed correctly.
-// Point #6: behavioral_events_json itself is gone, but every summary count
-// derived from it is still correct.
+// Raw scroll_event_count must never be exported as a primary measure, and
+// mouse hover/focus signals must never be exported as proof of reading.
+// This is a direct, automated check against the project's explicit
+// constraint (see governing spec) rather than relying on code review alone.
+// ---------------------------------------------------------------------------
+test('raw scroll_event_count and hover-based measures are never exported as primary CSV columns', () => {
+  const hasScrollEventColumn = CSV_COLUMNS.some((col) => /scroll_event_count/i.test(col));
+  const hasHoverColumn = CSV_COLUMNS.some((col) => /hover/i.test(col));
+  assert.equal(hasScrollEventColumn, false, 'CSV_COLUMNS must not include any *scroll_event_count* column');
+  assert.equal(hasHoverColumn, false, 'CSV_COLUMNS must not include any *hover* column');
+});
+
+// ---------------------------------------------------------------------------
+// navigation_sequence is exported as the already-collapsed (no consecutive
+// duplicates) sequence string, joined with '>'. This locks in the export
+// format so a future change to the join character/shape is caught here
+// rather than silently changing the CSV schema.
+// ---------------------------------------------------------------------------
+test('navigation_sequence is exported as a >-joined string, unmodified from timing[paperId]', () => {
+  const record = makeRecord({
+    timing: {
+      font: {
+        duration_ms: 50000,
+        pdf_exposure_proportion_5s: 1,
+        navigation_sequence: 'Top>Bottom>Top',
+        navigation_transition_count: 2,
+        backward_transition_count: 1
+      }
+    }
+  });
+  const row = flattenRecord(record);
+  assert.equal(row.font_navigation_sequence, 'Top>Bottom>Top');
+  assert.equal(typeof row.font_navigation_sequence, 'string');
+});
+
+// ---------------------------------------------------------------------------
+// Per-question process measures (response length, keystrokes, paste counts,
+// revision counts) and their totals are computed correctly.
+// ---------------------------------------------------------------------------
+test('per-question process measures and totals are computed correctly', () => {
+  const csv = buildAccumulatedCsv(fixtures);
+  const objs = csvToObjects(csv);
+  const row0 = objs[0];
+  assert.equal(row0.font_strength_1_keystrokes, '120');
+  assert.equal(row0.food_strength_1_keystrokes, '80');
+  assert.equal(Number(row0.font_strength_1_response_length), row0.font_strength_1.length);
+  assert.equal(row0.font_strength_1_paste_count, '1');
+  assert.equal(row0.font_strength_1_ai_to_answer_paste_count, '1');
+  assert.equal(row0.font_strength_1_revision_event_count, '1');
+  assert.equal(row0.total_logged_keystrokes, '200');
+
+  // Only font_strength_1 has logged keystrokes/paste/revision activity in this
+  // fixture -- a sibling field in the SAME group (font_strength_2) must not
+  // pick up any of that activity by accident.
+  assert.equal(row0.font_strength_2_keystrokes, '0', 'font_strength_2 must not inherit keystrokes logged against font_strength_1');
+  assert.equal(row0.font_strength_2_paste_count, '0', 'font_strength_2 must not inherit a paste event logged against font_strength_1');
+  assert.equal(row0.font_strength_2_revision_event_count, '0', 'font_strength_2 must not inherit a revision logged against font_strength_1');
+});
+
+// ---------------------------------------------------------------------------
+// All 27 semantic open-response columns (3 papers x 9 strength/limitation/
+// improvement items) exist, and the old 3-per-paper q1/q2/q3 columns are
+// completely gone from the schema.
+// ---------------------------------------------------------------------------
+const NEW_OPEN_RESPONSE_SUFFIXES = [
+  'strength_1', 'strength_2', 'strength_3',
+  'limitation_1', 'limitation_2', 'limitation_3',
+  'improvement_1', 'improvement_2', 'improvement_3'
+];
+const ALL_PAPER_IDS = ['font', 'food', 'listing'];
+
+test('all 27 semantic open-response columns exist in the CSV schema', () => {
+  let count = 0;
+  ALL_PAPER_IDS.forEach((paperId) => {
+    NEW_OPEN_RESPONSE_SUFFIXES.forEach((suffix) => {
+      const col = `${paperId}_${suffix}`;
+      assert.ok(CSV_COLUMNS.includes(col), col + ' must exist as a CSV column');
+      count++;
+    });
+  });
+  assert.equal(count, 27, 'there must be exactly 27 semantic open-response columns (3 papers x 9 items)');
+});
+
+test('the old <paper>_q1/_q2/_q3 columns no longer exist anywhere in the schema', () => {
+  ALL_PAPER_IDS.forEach((paperId) => {
+    ['q1', 'q2', 'q3'].forEach((oldSuffix) => {
+      const oldCol = `${paperId}_${oldSuffix}`;
+      assert.ok(!CSV_COLUMNS.includes(oldCol), oldCol + ' must NOT exist in the new schema');
+      assert.ok(!CSV_COLUMNS.includes(oldCol + '_response_length'), oldCol + '_response_length must NOT exist');
+      assert.ok(!CSV_COLUMNS.includes(oldCol + '_keystrokes'), oldCol + '_keystrokes must NOT exist');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Each of the 9 fields for a paper round-trips independently through CSV with
+// its own distinct value -- a multiline/comma/quote/Unicode-laden value in
+// one field, and confirm none of the 9 sibling fields ever cross-contaminate.
+// ---------------------------------------------------------------------------
+test('each of the 9 open-response fields for a paper round-trips independently, with no cross-contamination', () => {
+  const distinctValues = {};
+  NEW_OPEN_RESPONSE_SUFFIXES.forEach((suffix, i) => {
+    distinctValues[`font_${suffix}`] = `UNIQUE-VALUE-${i}-for-${suffix}`;
+  });
+  const record = makeRecord({
+    responses: Object.assign({}, makeRecord({}).responses, distinctValues)
+  });
+  const csv = buildAccumulatedCsv([record]);
+  const objs = csvToObjects(csv);
+  const row0 = objs[0];
+  NEW_OPEN_RESPONSE_SUFFIXES.forEach((suffix, i) => {
+    assert.equal(row0[`font_${suffix}`], `UNIQUE-VALUE-${i}-for-${suffix}`, `font_${suffix} must round-trip its own distinct value`);
+    // Make sure none of the OTHER 8 fields accidentally picked up this value.
+    NEW_OPEN_RESPONSE_SUFFIXES.forEach((otherSuffix) => {
+      if (otherSuffix === suffix) return;
+      assert.notEqual(row0[`font_${otherSuffix}`], `UNIQUE-VALUE-${i}-for-${suffix}`, `font_${otherSuffix} must not contain font_${suffix}'s value`);
+    });
+  });
+});
+
+test('multiline text, commas, quotation marks, and Unicode all survive together in a single new field', () => {
+  const trickyValue = 'Line one.\nLine two with a comma, a "quoted phrase", café, ×, and éèê.';
+  const record = makeRecord({
+    responses: Object.assign({}, makeRecord({}).responses, {
+      font_limitation_2: trickyValue
+    })
+  });
+  const csv = buildAccumulatedCsv([record]);
+  const objs = csvToObjects(csv);
+  assert.equal(objs[0].font_limitation_2, trickyValue, 'font_limitation_2 must preserve newline, comma, quotes, and Unicode exactly');
+});
+
+// ---------------------------------------------------------------------------
+// Strength 1's response text cannot accidentally appear under Strength 2/3,
+// or under any Limitation/Improvement column -- a direct check against
+// category bleed, beyond the generic round-trip test above.
+// ---------------------------------------------------------------------------
+test('a Strength 1 response cannot accidentally appear in Strength 2/3 or another category', () => {
+  const sentinel = 'SENTINEL-ONLY-IN-STRENGTH-1';
+  const record = makeRecord({
+    responses: Object.assign({}, makeRecord({}).responses, {
+      food_strength_1: sentinel
+    })
+  });
+  const csv = buildAccumulatedCsv([record]);
+  const objs = csvToObjects(csv);
+  const row0 = objs[0];
+  assert.equal(row0.food_strength_1, sentinel);
+  NEW_OPEN_RESPONSE_SUFFIXES.filter((s) => s !== 'strength_1').forEach((suffix) => {
+    assert.notEqual(row0[`food_${suffix}`], sentinel, `food_${suffix} must not contain the Strength 1 sentinel value`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// total_response_length and total_logged_keystrokes sum across all 9
+// open-response fields per assigned paper, not just the first item.
+// ---------------------------------------------------------------------------
+test('total_response_length and total_logged_keystrokes sum across all 9 fields per assigned paper', () => {
+  const record = makeRecord({
+    responses: Object.assign({}, makeRecord({}).responses, {
+      font_strength_2: 'twelve chars',
+      font_limitation_3: 'seven'
+    }),
+    logs: {
+      font_strength_1: { keystrokes: 120, drafts: [] },
+      food_strength_1: { keystrokes: 80, drafts: [] },
+      font_strength_2: { keystrokes: 15, drafts: [] }
+    }
+  });
+  const row = flattenRecord(record);
+  let expectedLength = 0;
+  ['font', 'food'].forEach((paperId) => {
+    NEW_OPEN_RESPONSE_SUFFIXES.forEach((suffix) => {
+      expectedLength += String(record.responses[`${paperId}_${suffix}`] || '').length;
+    });
+  });
+  assert.equal(row.total_response_length, expectedLength, 'total_response_length must equal the sum of all 18 assigned-paper open-response field lengths');
+  assert.equal(row.total_logged_keystrokes, 120 + 80 + 15, 'total_logged_keystrokes must sum keystrokes logged against any of the 9 fields per paper');
+});
+
+// ---------------------------------------------------------------------------
+// Behavioral and paste-pathway summary counts are derived correctly from the
+// raw event arrays.
 // ---------------------------------------------------------------------------
 test('behavioral and paste-pathway summary counts are derived correctly', () => {
   const csv = buildAccumulatedCsv(fixtures);
   const objs = csvToObjects(csv);
   const row0 = objs[0];
-  assert.equal(row0.behavioral_event_count, '4');
-  assert.equal(row0.violation_count, '1');
-  assert.equal(row0.focus_count, '1');
-  assert.equal(row0.visibility_visible_count, '1');
   assert.equal(row0.visibility_hidden_count, '1');
-  assert.equal(row0.fullscreen_enter_count, '1');
-  assert.equal(row0.copy_event_count, '1');
-  assert.equal(row0.paste_event_count, '4');
+  assert.equal(row0.fullscreen_exit_count, '1');
   assert.equal(row0.ai_to_answer_paste_count, '1');
+  assert.equal(row0.answer_to_ai_paste_count, '1');
   assert.equal(row0.question_to_ai_paste_count, '1');
   assert.equal(row0.external_to_answer_paste_count, '1');
-  assert.equal(row0.external_to_ai_paste_count, '1');
   assert.equal(row0.revision_event_count, '1');
   assert.equal(row0.questions_revised_count, '1');
-  assert.equal(row0.total_chars_inserted_during_revisions, '30');
-  assert.equal(row0.total_chars_deleted_during_revisions, '12');
-  assert.equal(row0.total_logged_keystrokes, '200'); // 120 + 80
-  assert.equal(row0.questions_with_draft_history, '1');
 });
 
 // ---------------------------------------------------------------------------
-// CSV cell escaping survives commas/quotes embedded directly in a value
-// (independent spot-check beyond the multiline/Unicode test above).
+// Transcript columns: exactly 2 positions x 5 turns x 4 fields = 40 columns,
+// correctly mapped to the assigned paper at each position, never crossed.
 // ---------------------------------------------------------------------------
-test('commas and embedded quotes in a single cell survive a full serialize/parse round trip', () => {
-  const tricky = [Object.assign({}, fixtures[0], {
-    responses: Object.assign({}, fixtures[0].responses, {
-      font_q1: 'Has a comma, a "quoted phrase", and a trailing quote"'
-    })
-  })];
-  const csv = buildAccumulatedCsv(tricky);
-  const objs = csvToObjects(csv);
-  assert.equal(objs[0].font_q1, 'Has a comma, a "quoted phrase", and a trailing quote"');
-});
-
-// ===========================================================================
-// New tests for this revision request (points #1-#5, #8 list of 14 behaviors)
-// ===========================================================================
-
-// ---------------------------------------------------------------------------
-// Points #1 and #1's test requirement: ai_purpose_other primarily reads
-// responses.ai_purpose_specify, preserves the original key in responses_json,
-// and the complete value survives in the original record (would be returned
-// unmodified by the JSON export route).
-// ---------------------------------------------------------------------------
-test('ai_purpose_other reads from responses.ai_purpose_specify when present', () => {
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  const row0 = objs.find((r) => r.participant_id === 'P-TEST-AI-PRE-0001');
-  assert.equal(row0.ai_purpose_other, 'Brainstorming counterarguments');
-
-  // The original key/value remains in responses_json.
-  const responses = JSON.parse(row0.responses_json);
-  assert.equal(responses.ai_purpose_specify, 'Brainstorming counterarguments');
-
-  // And the complete value remains in the original stored record (what the
-  // accumulated JSON export returns unmodified).
-  const original = byId('P-TEST-AI-PRE-0001');
-  assert.equal(original.responses.ai_purpose_specify, 'Brainstorming counterarguments');
-});
-
-// ---------------------------------------------------------------------------
-// Point #1's fallback requirement: when ai_purpose_specify is absent but
-// responses['rg-ai-purpose-specify'] has a value, ai_purpose_other falls
-// back to it. Uses fixture P-TEST-AI-FALLBACK-0005, which deliberately omits
-// ai_purpose_specify.
-// ---------------------------------------------------------------------------
-test('ai_purpose_other falls back to responses["rg-ai-purpose-specify"] when ai_purpose_specify is absent', () => {
-  const fallbackRecord = byId('P-TEST-AI-FALLBACK-0005');
-  assert.ok(!('ai_purpose_specify' in fallbackRecord.responses), 'fixture sanity check: ai_purpose_specify must be absent');
-  assert.equal(fallbackRecord.responses['rg-ai-purpose-specify'], 'Fallback only value');
-
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  const row = objs.find((r) => r.participant_id === 'P-TEST-AI-FALLBACK-0005');
-  assert.equal(row.ai_purpose_other, 'Fallback only value', 'must fall back to the raw DOM-id key when the canonical key is absent');
-
-  // Still recoverable from responses_json, and the complete original record
-  // is untouched (as the JSON export would return it).
-  const responses = JSON.parse(row.responses_json);
-  assert.equal(responses['rg-ai-purpose-specify'], 'Fallback only value');
-});
-
-test('ai_purpose_other is blank when neither key has a value', () => {
-  const neither = [{ responses: {} }];
-  const csv = buildAccumulatedCsv(neither);
-  const objs = csvToObjects(csv);
-  assert.equal(objs[0].ai_purpose_other, '', 'must be blank, never invented');
-});
-
-// ---------------------------------------------------------------------------
-// Points #4 and #5: exactly 5 fixed exchange slots x 4 columns exist for
-// both paper_1 and paper_2 — 40 transcript columns total, no per-exchange
-// success/latency/error columns.
-// ---------------------------------------------------------------------------
-test('exactly 40 fixed transcript columns exist (5 exchanges x 4 fields x 2 paper positions)', () => {
-  assert.equal(MAX_AI_EXCHANGES_PER_PAPER, 5);
+test('exactly 40 fixed transcript columns exist (5 turns x 4 fields x 2 paper positions)', () => {
   const csv = buildAccumulatedCsv(fixtures);
   const objs = csvToObjects(csv);
   const headers = Object.keys(objs[0]);
-
   let transcriptColCount = 0;
   [1, 2].forEach((position) => {
     for (let n = 1; n <= 5; n++) {
@@ -532,244 +680,67 @@ test('exactly 40 fixed transcript columns exist (5 exchanges x 4 fields x 2 pape
     }
   });
   assert.equal(transcriptColCount, 40);
-
-  // Explicitly absent: per-exchange success/latency/error columns (spec
-  // point #3 explicitly forbids these — that detail stays in JSON/summaries).
-  [1, 2].forEach((position) => {
-    for (let n = 1; n <= 5; n++) {
-      ['success', 'latency_ms', 'error'].forEach((forbidden) => {
-        const key = 'paper_' + position + '_' + forbidden + '_' + n;
-        assert.ok(!headers.includes(key), key + ' must NOT exist as a column');
-      });
-    }
-  });
-
-  // paper_<position>_id / _title columns also exist.
-  assert.ok(headers.includes('paper_1_id'));
-  assert.ok(headers.includes('paper_1_title'));
-  assert.ok(headers.includes('paper_2_id'));
-  assert.ok(headers.includes('paper_2_title'));
 });
 
-// ---------------------------------------------------------------------------
-// Point #7: messages map to the correct assigned-paper position via paper_id
-// (study_1_id / study_2_id), never crossing positions.
-// ---------------------------------------------------------------------------
-test('transcript messages map to the correct assigned-paper position', () => {
+test('transcript messages map to the correct assigned-paper position, never crossing positions', () => {
   const csv = buildAccumulatedCsv(fixtures);
   const objs = csvToObjects(csv);
-  const row0 = objs.find((r) => r.participant_id === 'P-TEST-AI-PRE-0001');
-  // P-TEST-AI-PRE-0001: study_1_id = font (position 1), study_2_id = food (position 2).
+  const row0 = objs.find((r) => r.participant_id === 'P-TEST-0001');
   assert.equal(row0.paper_1_id, 'font');
   assert.equal(row0.paper_2_id, 'food');
   assert.equal(row0.paper_1_participant_message_1, 'What is the main claim of font?');
   assert.equal(row0.paper_2_participant_message_1, 'What is the main claim of food?');
-  // Never crossed: font's message never lands under paper_2_*, and vice versa.
   assert.notEqual(row0.paper_2_participant_message_1, row0.paper_1_participant_message_1);
-});
-
-// ---------------------------------------------------------------------------
-// Point #8: message order within a paper is correct — uses fixture
-// P-TEST-AI-FULL5-0006, whose ai_message_log array is deliberately stored
-// OUT of message_number order (shuffled 3,1,5,2,4), to prove the CSV sorts
-// by message_number rather than trusting array position.
-// ---------------------------------------------------------------------------
-test('transcript exchanges are ordered by message_number, independent of ai_message_log array order', () => {
-  const full5 = byId('P-TEST-AI-FULL5-0006');
-  // Fixture sanity check: the stored array is genuinely out of order.
-  const storedOrder = full5.ai_message_log.map((m) => m.message_number);
-  assert.deepEqual(storedOrder, [3, 1, 5, 2, 4], 'fixture sanity check: ai_message_log must be stored out of order');
-
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  const row = objs.find((r) => r.participant_id === 'P-TEST-AI-FULL5-0006');
-  // paper_1 is font for this record.
-  assert.equal(row.paper_1_id, 'font');
-  for (let n = 1; n <= 5; n++) {
-    assert.equal(row['paper_1_participant_message_' + n], 'Font message ' + n, 'exchange ' + n + ' must be in message_number order, not array order');
-    assert.equal(row['paper_1_ai_message_' + n], 'Font reply ' + n);
+  // Unused turns 2-5 are blank, not undefined/null literal text.
+  for (let n = 2; n <= 5; n++) {
+    assert.equal(row0['paper_1_participant_message_' + n], '');
   }
 });
 
 // ---------------------------------------------------------------------------
-// Point #5 ("keep 5 slots even when fewer/more than 5 are used") and this
-// revision's point #1 ("N/A for genuinely unused/inapplicable slots"): this
-// same fixture record's paper_2 (food) has zero AI messages even though the
-// participant IS in the AI condition, so all 20 of its transcript cells
-// must be "N/A" (never blank, never literal undefined/null).
+// JSON export completeness: the raw stored record (exactly what the JSON
+// export route returns, never passed through cleanRecord) retains every
+// original field, proving CSV-only field removal has zero effect on the
+// JSON export.
 // ---------------------------------------------------------------------------
-test('a paper with zero AI messages has "N/A" in all 20 of its transcript cells, never blank/undefined/null literals', () => {
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  const row = objs.find((r) => r.participant_id === 'P-TEST-AI-FULL5-0006');
-  assert.equal(row.paper_2_id, 'food');
-  for (let n = 1; n <= 5; n++) {
-    ['participant_message', 'participant_message_time', 'ai_message', 'ai_message_time'].forEach((field) => {
-      const val = row['paper_2_' + field + '_' + n];
-      assert.equal(val, TRANSCRIPT_NOT_APPLICABLE);
-      assert.notEqual(val, '');
-      assert.notEqual(val, 'undefined');
-      assert.notEqual(val, 'null');
-    });
-  }
-});
-
-// ---------------------------------------------------------------------------
-// This revision's point #1/#5 again from the other fixture: P-TEST-AI-PRE-0001
-// sent only 2 of 5 possible messages per paper (one success, one failure —
-// see the dedicated failed-request test below), so exchanges 3-5 (genuinely
-// never used) must be "N/A", never blank and never undefined/null literals.
-// ---------------------------------------------------------------------------
-test('unused exchange slots (fewer than 5 messages sent) are "N/A", never blank/undefined/null literals', () => {
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  const row = objs.find((r) => r.participant_id === 'P-TEST-AI-PRE-0001');
-  for (let n = 3; n <= 5; n++) {
-    ['participant_message', 'participant_message_time', 'ai_message', 'ai_message_time'].forEach((field) => {
-      const val = row['paper_1_' + field + '_' + n];
-      assert.equal(val, TRANSCRIPT_NOT_APPLICABLE);
-      assert.notEqual(val, '');
-      assert.notEqual(val, 'undefined');
-      assert.notEqual(val, 'null');
-    });
-  }
-});
-
-// ---------------------------------------------------------------------------
-// Point #11, plus this revision's points #2/#5: a failed request preserves
-// the participant's prompt and timestamp, but does not invent an AI
-// response or AI-message timestamp — AND those two blank fields must stay
-// distinguishable from "N/A" (the slot WAS used/applicable; the request
-// simply did not return a successful response).
-// ---------------------------------------------------------------------------
-test('a failed AI request keeps the participant prompt/timestamp but leaves ai_message/ai_message_time blank (not "N/A")', () => {
-  const original = byId('P-TEST-AI-PRE-0001');
-  const failedEntry = original.ai_message_log.find((m) => m.paper_id === 'font' && m.success === false);
-  assert.ok(failedEntry, 'fixture sanity check: a failed font entry must exist');
-  assert.equal(failedEntry.message_number, 2);
-
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  const row = objs.find((r) => r.participant_id === 'P-TEST-AI-PRE-0001');
-  // Exchange 2 on paper_1 (font) is the failed one.
-  assert.equal(row.paper_1_participant_message_2, 'Follow-up question');
-  assert.notEqual(row.paper_1_participant_message_2, TRANSCRIPT_NOT_APPLICABLE, 'a failed request must never report its own prompt as N/A');
-  assert.equal(row.paper_1_participant_message_time_2, failedEntry.submit_ts_iso);
-  assert.notEqual(row.paper_1_participant_message_time_2, TRANSCRIPT_NOT_APPLICABLE);
-
-  assert.equal(row.paper_1_ai_message_2, '', 'no AI response must be invented for a failed request');
-  assert.notEqual(row.paper_1_ai_message_2, TRANSCRIPT_NOT_APPLICABLE, 'a failed request\'s blank AI response must not be confused with an unused/N-A slot');
-  assert.equal(row.paper_1_ai_message_time_2, '', 'no AI-response timestamp must be invented for a failed request');
-  assert.notEqual(row.paper_1_ai_message_time_2, TRANSCRIPT_NOT_APPLICABLE);
-
-  // The same failure is independently confirmed on paper_2 (food).
-  const failedEntry2 = original.ai_message_log.find((m) => m.paper_id === 'food' && m.success === false);
-  assert.ok(failedEntry2);
-  assert.equal(row.paper_2_participant_message_2, 'Follow-up question');
-  assert.equal(row.paper_2_ai_message_2, '');
-  assert.notEqual(row.paper_2_ai_message_2, TRANSCRIPT_NOT_APPLICABLE);
-});
-
-// ---------------------------------------------------------------------------
-// This revision's point #5, items 6-8: paper-level/total failed-message
-// counts remain correct, the accumulated JSON export still preserves full
-// failure metadata (re-confirmed alongside the existing JSON-completeness
-// test below), and no transcript cell anywhere in the CSV is ever the
-// literal string "undefined" or "null" — checked across every row and every
-// one of the 40 transcript columns, not just the targeted fixtures above.
-// ---------------------------------------------------------------------------
-test('paper-level and total failed-message counts remain correct alongside the new N/A transcript cells', () => {
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  const row = objs.find((r) => r.participant_id === 'P-TEST-AI-PRE-0001');
-  assert.equal(row.font_ai_failed_message_count, '1');
-  assert.equal(row.food_ai_failed_message_count, '1');
-  assert.equal(row.total_failed_ai_messages, '2');
-
-  const noAiRow = objs.find((r) => r.participant_id === 'P-TEST-NOAI-PRE-0003');
-  assert.equal(noAiRow.font_ai_failed_message_count, '0');
-  assert.equal(noAiRow.listing_ai_failed_message_count, '0');
-  assert.equal(noAiRow.total_failed_ai_messages, '0');
-});
-
-test('no transcript cell in the entire CSV is ever the literal string "undefined" or "null"', () => {
-  const csv = buildAccumulatedCsv(fixtures);
-  const objs = csvToObjects(csv);
-  objs.forEach((row) => {
-    [1, 2].forEach((position) => {
-      for (let n = 1; n <= 5; n++) {
-        ['participant_message', 'participant_message_time', 'ai_message', 'ai_message_time'].forEach((field) => {
-          const val = row['paper_' + position + '_' + field + '_' + n];
-          assert.notEqual(val, 'undefined', 'paper_' + position + '_' + field + '_' + n + ' must never be the literal string "undefined"');
-          assert.notEqual(val, 'null', 'paper_' + position + '_' + field + '_' + n + ' must never be the literal string "null"');
-          // Every transcript cell must be one of: "N/A", "" (blank, failed
-          // request), or an actual non-empty captured value.
-          assert.ok(val === TRANSCRIPT_NOT_APPLICABLE || val === '' || val.length > 0);
-        });
-      }
-    });
+test('the raw record (as returned by the JSON export route) retains every original field untouched', () => {
+  const record = makeRecord({});
+  ['quiz', 'draft_history', 'keystroke_counts', 'ai_message_log', 'behavioral_events',
+    'responses', 'ai_chats', 'timing', 'ai_paper_aggregates', 'paste_events',
+    'revision_log', 'logs'].forEach((field) => {
+    assert.ok(field in record, field + ' must remain present in the raw/JSON-export record');
   });
+  assert.equal(record.ai_message_log.length, 4);
+  assert.equal(record.behavioral_events.length, 4);
 });
 
 // ---------------------------------------------------------------------------
-// Point #2: the accumulated JSON export (i.e. the raw stored records, which
-// is exactly what the /api/admin/export-submissions.json route returns,
-// completely independent of buildColumns/cleanRecord) still contains the
-// complete ai_message_log, behavioral_events, and all other original data
-// for every record — proving the CSV column removals have zero effect on
-// JSON completeness.
+// buildAiTranscriptRows / buildAiTranscriptCsv: one row per actual exchange
+// (not per fixed slot), correctly tagging success/failure and paper context.
 // ---------------------------------------------------------------------------
-test('the accumulated JSON export still contains the complete ai_message_log, behavioral_events, and all other original data', () => {
-  // The JSON export route (server.js) calls loadAllSubmissionRecords() and
-  // returns res.json(records) directly — it never calls cleanRecord() or
-  // buildColumns(). We simulate that exact behavior here: the "JSON export"
-  // is just the raw fixture records, untouched.
-  fixtures.forEach((original) => {
-    // ai_message_log: present and complete, including failed entries with
-    // null response (not stripped, not summarized).
-    assert.ok(Array.isArray(original.ai_message_log));
-    if (original.participant_id === 'P-TEST-AI-PRE-0001') {
-      assert.equal(original.ai_message_log.length, 4);
-      const longReply = original.ai_message_log.find((m) => m.response && m.response.length > 1000);
-      assert.ok(longReply, 'the long AI assistant reply must be present and unmodified in ai_message_log');
-      const failed = original.ai_message_log.find((m) => m.success === false);
-      assert.equal(failed.response, null, 'failed entries keep response: null, exactly as stored');
-    }
+test('buildAiTranscriptRows produces one row per chat exchange with correct success tagging', () => {
+  const rows = buildAiTranscriptRows(fixtures);
+  const row0Font = rows.find((r) => r.participant_id === 'P-TEST-0001' && r.paper_id === 'font');
+  assert.ok(row0Font);
+  assert.equal(row0Font.participant_prompt, 'What is the main claim of font?');
+  assert.equal(row0Font.paper_order_position, 1);
 
-    // behavioral_events: present and complete.
-    assert.ok(Array.isArray(original.behavioral_events));
-
-    // Everything else listed in the spec as required to remain complete.
-    ['responses', 'ai_chats', 'timing', 'ai_paper_aggregates', 'copy_events',
-      'paste_events', 'revision_log', 'logs', 'violations'].forEach((field) => {
-      assert.ok(field in original, field + ' must remain present in the JSON export');
-    });
-
-    // Submission and assignment metadata.
-    ['participant_id', 'prolific_id', 'completion_status', 'assignment_cell',
-      'assignment_source', 'paper_order', 'study_1_id', 'study_2_id'].forEach((field) => {
-      assert.ok(field in original, field + ' (submission/assignment metadata) must remain present in the JSON export');
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Point #6 (re-confirmed alongside #2): behavioral_events_json is absent as
-// a CSV column, but every behavioral summary column is still present and
-// correctly derived, and the full detailed array remains in the raw record
-// (i.e. the JSON export).
-// ---------------------------------------------------------------------------
-test('behavioral summary columns remain even though behavioral_events_json is removed from the CSV', () => {
-  const csv = buildAccumulatedCsv(fixtures);
+  const csv = buildAiTranscriptCsv(fixtures);
   const objs = csvToObjects(csv);
-  const headers = Object.keys(objs[0]);
-  assert.ok(!headers.includes('behavioral_events_json'));
-  [
-    'behavioral_event_count', 'violation_count', 'blur_count', 'focus_count',
-    'visibility_event_count', 'visibility_hidden_count', 'visibility_visible_count',
-    'fullscreen_enter_count', 'fullscreen_exit_count', 'copy_event_count', 'paste_event_count'
-  ].forEach((k) => assert.ok(headers.includes(k), k + ' must remain as a column'));
+  assert.deepEqual(Object.keys(objs[0]), AI_TRANSCRIPT_COLUMNS);
+  // The No-AI participant has no chats at all, so contributes zero transcript rows.
+  assert.ok(!objs.some((r) => r.participant_id === 'P-TEST-NOAI-0002'));
+});
 
-  const original = byId('P-TEST-AI-PRE-0001');
-  assert.equal(original.behavioral_events.length, 4, 'full behavioral_events array remains in the raw/JSON-export record');
+// ---------------------------------------------------------------------------
+// flattenRecord is a pure function: calling it twice on the same input
+// yields identical output, and it never mutates its input record.
+// ---------------------------------------------------------------------------
+test('flattenRecord is pure: identical output across calls, no mutation of input', () => {
+  const record = makeRecord({});
+  const before = JSON.stringify(record);
+  const row1 = flattenRecord(record);
+  const row2 = flattenRecord(record);
+  assert.deepEqual(row1, row2);
+  assert.equal(JSON.stringify(record), before, 'flattenRecord must not mutate its input record');
 });
