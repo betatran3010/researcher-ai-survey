@@ -2154,7 +2154,7 @@ function getStudyPdfImages(paperId) {
 // IMPLEMENTATION ADAPTATIONS (ours, specific to this split-panel
 // survey -- NOT specified by the cited papers):
 //  1. Each of the three actual rendered PDF pages is divided into
-//     Top/Middle/Bottom, yielding nine ordered regions. The geometry,
+//     Top/Middle/Bottom, yielding six ordered regions. The geometry,
 //     overlap-crediting, dominant-state, and hysteresis rules are
 //     study-specific deterministic implementation choices.
 //  2. Exposure-bucket accumulation excludes time when the tab is
@@ -2217,19 +2217,19 @@ const DOMINANT_REGION_TIE_RATIO = 0.01;
 
 const VIEWPORT_TRACKERS = {};
 
-// Canonical nine-region reading order for a three-page paper, 0-indexed per
+// Canonical six-region reading order for a three-page paper, 0-indexed per
 // the governing spec's explicit backward-transition table (P1-Top = 0 ...
-// P3-Bottom = 8). Used only to rank regions for backward-transition
+// P3-Bottom-Half = 5). Used only to rank regions for backward-transition
 // counting and first-state tie-breaking; actual region BOUNDARIES always
-// come from the real rendered page geometry (see buildNineRegions below),
+// come from the real rendered page geometry (see buildSixRegions below),
 // never from this list.
-const NINE_REGION_ORDER = [
-  'P1-Top', 'P1-Middle', 'P1-Bottom',
-  'P2-Top', 'P2-Middle', 'P2-Bottom',
-  'P3-Top', 'P3-Middle', 'P3-Bottom'
+const SIX_REGION_ORDER = [
+  'P1-Top-Half', 'P1-Bottom-Half',
+  'P2-Top-Half', 'P2-Bottom-Half',
+  'P3-Top-Half', 'P3-Bottom-Half'
 ];
-const NINE_REGION_INDEX = {};
-NINE_REGION_ORDER.forEach((label, i) => { NINE_REGION_INDEX[label] = i; });
+const SIX_REGION_INDEX = {};
+SIX_REGION_ORDER.forEach((label, i) => { SIX_REGION_INDEX[label] = i; });
 
 // Sentinel, non-navigable states: 'Unrendered' (PDF/page geometry not yet
 // available) and 'Unclassified' (no region had any visible overlap, e.g.
@@ -2259,7 +2259,7 @@ function getPdfViewportRange(paperId) {
 // visibleTop/visibleBottom (i.e. (rect.top - wrapRect.top), which is
 // scroll-position-independent since both the wrap and its canvas children
 // move together when the pane scrolls). Per spec, page boundaries for the
-// nine-region scheme must come from this real geometry, never from
+// six-region scheme must come from this real geometry, never from
 // dividing the whole multi-page document height into nine equal slices.
 function getPageGeometry(paperId) {
   const wrap = document.getElementById('pdfWrap-' + paperId);
@@ -2274,31 +2274,31 @@ function getPageGeometry(paperId) {
   return pages;
 }
 
-// Splits each real rendered page into three equal-height regions (Top /
-// Middle / Bottom), producing the nine ordered P<n>-Top..P<n>-Bottom
+// Splits each real rendered page into two equal-height regions (Top /
+// Middle / Bottom), producing the six ordered P<n>-Top-Half..P<n>-Bottom-Half
 // regions in reading order. Degenerate pages (zero/negative height, e.g. a
 // page whose canvas hasn't actually rendered yet) are skipped rather than
 // producing a malformed region.
-function buildNineRegions(pages) {
-  const names = ['Top', 'Middle', 'Bottom'];
+function buildSixRegions(pages) {
+  const names = ['Top-Half', 'Bottom-Half'];
   const regions = [];
   for (let p = 0; p < pages.length; p += 1) {
     const page = pages[p];
     const height = page.bottom - page.top;
     if (!(height > 0)) continue;
-    const third = height / 3;
-    for (let n = 0; n < 3; n += 1) {
+    const half = height / 2;
+    for (let n = 0; n < 2; n += 1) {
       regions.push({
         label: 'P' + (p + 1) + '-' + names[n],
-        top: page.top + n * third,
-        bottom: n === 2 ? page.bottom : page.top + (n + 1) * third
+        top: page.top + n * half,
+        bottom: n === 1 ? page.bottom : page.top + (n + 1) * half
       });
     }
   }
   return regions;
 }
 
-// Re-reads page geometry and rebuilds the nine-region list for `paperId`.
+// Re-reads page geometry and rebuilds the six-region list for `paperId`.
 // Safe to call on every viewport-change event (scroll/resize/visibility/
 // focus): re-deriving boundaries from current canvas rects is the only way
 // to stay correct across window resizes (the canvases are CSS
@@ -2312,12 +2312,12 @@ function refreshRegionGeometry(paperId) {
   const tracker = VIEWPORT_TRACKERS[paperId];
   if (!tracker) return;
   const pages = getPageGeometry(paperId);
-  const regions = pages.length ? buildNineRegions(pages) : [];
+  const regions = pages.length ? buildSixRegions(pages) : [];
   // The finalized study design requires exactly three rendered pages,
-  // yielding exactly nine regions. Partial geometry (e.g. while canvases
+  // yielding exactly six regions. Partial geometry (e.g. while canvases
   // are still rendering) is not measurement-ready and must not generate
   // page/region outcomes.
-  const geometryReady = regions.length === NINE_REGION_ORDER.length;
+  const geometryReady = regions.length === SIX_REGION_ORDER.length;
   tracker.regions = geometryReady ? regions : [];
   if (geometryReady && (!tracker.regionExposedMs || tracker.regionExposedMs.length !== regions.length)) {
     tracker.regionExposedMs = new Array(regions.length).fill(0);
@@ -2357,7 +2357,7 @@ function pickDominantRegion(overlaps, regions, previousRegion) {
   return regions[tiedIdxs[0]].label;
 }
 
-// Computes the single dominant nine-region AOI state for the current
+// Computes the single dominant six-region AOI state for the current
 // viewport `range`, using tracker.regions (refreshed by the caller via
 // refreshRegionGeometry just before this runs). Maintains
 // tracker.lastValidDominantRegion as the rolling hysteresis state across
@@ -2473,7 +2473,7 @@ function tickSegment(paperId) {
   const { start, end } = bucketIndexRange(seg.top, seg.bottom, contentHeight, tracker.bucketCount);
   for (let i = start; i < end; i += 1) tracker.bucketExposedMs[i] += elapsed;
 
-  // Nine-region proportional exposure crediting for region_exposed_5s_count:
+  // Six-region proportional exposure crediting for region_exposed_5s_count:
   // each region accumulates this tick's elapsed ms multiplied by the
   // fraction of that region's own height which is currently visible, so a
   // viewport straddling the boundary of two regions (e.g. the bottom of one
@@ -2598,11 +2598,11 @@ function filterNavigableSegments(rawLog) {
 }
 
 // Counts forward/backward transitions across an already-aggregated,
-// already-filtered sequence of nine-region AOI names (see
+// already-filtered sequence of six-region AOI names (see
 // aggregateNavigationSequence above). Backward = a transition whose
 // destination has a LOWER index than its source in the canonical
-// NINE_REGION_INDEX reading order (P1-Top = 0 ... P3-Bottom = 8). Labels not
-// present in NINE_REGION_INDEX (should not occur for the 3-page papers this
+// SIX_REGION_INDEX reading order (P1-Top-Half = 0 ... P3-Bottom-Half = 5). Labels not
+// present in SIX_REGION_INDEX (should not occur for the 3-page papers this
 // study uses) are simply never counted as forward or backward, rather than
 // throwing.
 function countNavigationTransitions(sequence) {
@@ -2612,9 +2612,9 @@ function countNavigationTransitions(sequence) {
     transitions += 1;
     const prev = sequence[i - 1];
     const next = sequence[i];
-    if (Object.prototype.hasOwnProperty.call(NINE_REGION_INDEX, prev) &&
-      Object.prototype.hasOwnProperty.call(NINE_REGION_INDEX, next) &&
-      NINE_REGION_INDEX[next] < NINE_REGION_INDEX[prev]) {
+    if (Object.prototype.hasOwnProperty.call(SIX_REGION_INDEX, prev) &&
+      Object.prototype.hasOwnProperty.call(SIX_REGION_INDEX, next) &&
+      SIX_REGION_INDEX[next] < SIX_REGION_INDEX[prev]) {
       backward += 1;
     }
   }
