@@ -1273,6 +1273,14 @@ function validateCurrentPage() {
           behavior: 'smooth',
           block: 'center'
         });
+
+        if (
+          firstInvalid.tagName === 'INPUT' ||
+          firstInvalid.tagName === 'TEXTAREA' ||
+          firstInvalid.tagName === 'SELECT'
+        ) {
+          firstInvalid.focus({ preventScroll: true });
+        }
       }, 0);
     }
 
@@ -2781,12 +2789,6 @@ function showNumberInputError(input, message) {
 
   hint.textContent = message;
   hint.style.display = 'block';
-
-  // Do not repeatedly restart the banner for the same error on every keypress.
-  if (input.dataset.lastNumberError !== message) {
-    showWarnBanner(message);
-    input.dataset.lastNumberError = message;
-  }
 }
 
 function validateNumberInputImmediately(input) {
@@ -2797,34 +2799,46 @@ function validateNumberInputImmediately(input) {
     return false;
   }
 
-  delete input.dataset.lastNumberError;
   clearNumberInputError(input);
   return true;
 }
 
 function initializeImmediateNumberValidation() {
-  // Document-level listeners also catch the dynamically created PhD-year input.
+  // Validate only after the participant leaves the number field.
+  // This avoids showing an error while they are still typing, such as
+  // briefly entering "2" before completing "20".
+  document.addEventListener(
+    'blur',
+    event => {
+      const input = event.target;
+
+      if (
+        input &&
+        input.tagName === 'INPUT' &&
+        input.type === 'number'
+      ) {
+        validateNumberInputImmediately(input);
+      }
+    },
+    true
+  );
+
+  // Once an error is already visible, remove it as soon as the participant
+  // corrects the value.
   document.addEventListener('input', event => {
     const input = event.target;
 
     if (
       input &&
       input.tagName === 'INPUT' &&
-      input.type === 'number'
+      input.type === 'number' &&
+      input.classList.contains('input-error')
     ) {
-      validateNumberInputImmediately(input);
-    }
-  });
+      const message = getNumberInputError(input);
 
-  document.addEventListener('change', event => {
-    const input = event.target;
-
-    if (
-      input &&
-      input.tagName === 'INPUT' &&
-      input.type === 'number'
-    ) {
-      validateNumberInputImmediately(input);
+      if (!message) {
+        clearNumberInputError(input);
+      }
     }
   });
 }
