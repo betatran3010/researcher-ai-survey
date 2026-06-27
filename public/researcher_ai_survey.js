@@ -369,16 +369,16 @@ const STANDARD_Q_DEFS = [
     ]
   },
   {
+    suffix: 'understood', type: 'scale7', label: 'How well do you feel you understood this study?',
+    scaleEndLow: 'Not at all well', scaleEndHigh: 'Completely well'
+  },
+  {
     suffix: 'convincing', type: 'scale7', label: 'How convincing do you find this paper?',
     scaleEndLow: 'Not at all convincing', scaleEndHigh: 'Completely convincing'
   },
   {
     suffix: 'confidence', type: 'scale7', label: 'How confident are you about your responses to this study’s questions?',
     scaleEndLow: 'Not at all confident', scaleEndHigh: 'Completely confident'
-  },
-  {
-    suffix: 'understood', type: 'scale7', label: 'How well do you feel you understood this study?',
-    scaleEndLow: 'Not at all well', scaleEndHigh: 'Very well'
   }
 ];
 
@@ -2052,9 +2052,15 @@ function buildStudyPages() {
 
 function selectConvincing(btn) {
   const name = btn.getAttribute('data-name');
+  const scale = document.querySelector(`.conf-scale[data-name="${name}"]`);
+  if (scale && scale.classList.contains('locked')) {
+    alert("You can't change your response.");
+    return;
+  }
   document.querySelectorAll(`.conf-btn[data-name="${name}"]`).forEach(b => b.classList.remove('selected'));
   btn.classList.add('selected');
   DATA.responses[name] = parseInt(btn.getAttribute('data-val'), 10);
+  if (scale) scale.classList.add('locked');
 }
 
 function renderStudyPdfIfNeeded(paperId) {
@@ -4160,7 +4166,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   initConsentPage();
 
   // Populate the About You / SRL / CT / AI-experience radio groups and
-  // sliders before the participant reaches those pages.
   renderAllSections();
 
   pageOrder = ['page-consent'];
