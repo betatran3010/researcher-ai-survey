@@ -368,7 +368,18 @@ const STANDARD_Q_DEFS = [
       { suffix: 'improvement_3', itemLabel: 'Improvement or follow-up experiment 3' }
     ]
   },
-  { suffix: 'convincing', type: 'scale7', label: 'How convincing do you find this paper?' }
+  {
+    suffix: 'convincing', type: 'scale7', label: 'How convincing do you find this paper?',
+    scaleEndLow: 'Not at all convincing', scaleEndHigh: 'Completely convincing'
+  },
+  {
+    suffix: 'confidence', type: 'scale7', label: 'How confident are you about your responses to this study’s questions?',
+    scaleEndLow: 'Not at all confident', scaleEndHigh: 'Completely confident'
+  },
+  {
+    suffix: 'understood', type: 'scale7', label: 'How well do you feel you understood this study?',
+    scaleEndLow: 'Not at all well', scaleEndHigh: 'Very well'
+  }
 ];
 
 // ---------- Papers ----------
@@ -656,8 +667,7 @@ function buildPageOrder() {
 
   order.push(
     'page-study-1',
-    'page-study-2',
-    'page-reflections'
+    'page-study-2'
   );
 
   if (DATA.ct_scale_placement === 'post') {
@@ -675,8 +685,8 @@ function buildPageOrder() {
 function applySectionNumbers() {
   const pre = DATA.ct_scale_placement === 'pre';
   const map = pre
-    ? { about_you: 1, srl: 2, ct: 3, ai_experience: 4, task: 5, reflections: 6, quiz: 7, debrief: 8 }
-    : { about_you: 1, srl: 2, ai_experience: 3, task: 4, reflections: 5, ct: 6, quiz: 7, debrief: 8 };
+    ? { about_you: 1, srl: 2, ct: 3, ai_experience: 4, task: 5, quiz: 6, debrief: 7 }
+    : { about_you: 1, srl: 2, ai_experience: 3, task: 4, ct: 5, quiz: 6, debrief: 7 };
   Object.keys(map).forEach(k => {
     const el = document.getElementById('secnum-' + k.replace(/_/g, '-'));
     if (el) el.textContent = map[k];
@@ -1980,8 +1990,8 @@ function buildStudyPages() {
           <div class="q-label">${escapeHtml(label)}</div>
           <div class="conf-scale" data-name="${fieldId}">${btns}</div>
           <div class="scale-ends">
-            <div class="scale-end">Not at all convincing</div>
-            <div class="scale-end right">Completely convincing</div>
+            <div class="scale-end">${escapeHtml(def.scaleEndLow || '')}</div>
+            <div class="scale-end right">${escapeHtml(def.scaleEndHigh || '')}</div>
           </div>
         </div>`;
       }
@@ -3631,48 +3641,6 @@ document.addEventListener('paste', event => {
   }
 });
 
-// ---------- Reflections page ----------
-function buildPaperScaleRows(containerId, fieldPrefix) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-
-  let leftLabel = '';
-  let rightLabel = '';
-
-  if (fieldPrefix === 'confidence') {
-    leftLabel = 'Not at all confident';
-    rightLabel = 'Completely confident';
-  } else if (fieldPrefix === 'understood') {
-    leftLabel = 'Not at all well';
-    rightLabel = 'Very well';
-  }
-
-  container.innerHTML = DATA.study_order.map((paperId, i) => {
-    const name = fieldPrefix + '_' + paperId;
-    let btns = '';
-    for (let v = 1; v <= 7; v++) {
-      btns += `<button type="button" class="conf-btn" data-name="${name}" data-val="${v}" onclick="selectConvincing(this)">${v}</button>`;
-    }
-    return `<div class="conf-row" style="display:block;">
-      <div class="conf-label" style="margin-bottom:8px;">Paper ${i + 1}: ${escapeHtml(PAPERS[paperId].title)}</div>
-      <div class="conf-scale" data-name="${name}">${btns}</div>
-      <div class="scale-ends">
-        <div class="scale-end">${escapeHtml(leftLabel)}</div>
-        <div class="scale-end right">${escapeHtml(rightLabel)}</div>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function prepareReflectionsPage() {
-  inTaskPhase = false;
-  buildPaperScaleRows('confWrap', 'confidence');
-  buildPaperScaleRows('understandWrap', 'understood');
-  if (DATA.condition === 'AI') {
-    buildPerPaperAiReflections();
-  }
-}
-
 async function endTaskPhaseAndExitFullscreen() {
   // Stop behavioral-violation monitoring before exiting fullscreen,
   // so this expected task-completion exit is not logged as a violation.
@@ -3699,52 +3667,6 @@ async function endTaskPhaseAndExitFullscreen() {
       }
     }
   }
-}
-
-// Shared ownership (1-7 scale) question, asked once across both papers —
-// per the spec's "Overall, whose thinking..." wording (verbatim, not
-// per-paper). Field name is fixed ('whose_thinking') and picked up by
-// collectFieldsNow()'s generic name-based collection.
-function buildPerPaperAiReflections() {
-  const wrap = document.getElementById('perPaperAiReflectionsWrap');
-  if (!wrap) return;
-
-  const wtName = 'whose_thinking';
-
-  wrap.innerHTML = `
-    <div class="q-card">
-      <div class="q-label">
-        Overall, whose thinking is reflected in your responses?
-      </div>
-
-      <div class="conf-scale" data-name="${wtName}">
-        ${(function () {
-      let btns = '';
-
-      for (let v = 1; v <= 7; v++) {
-        btns += `
-              <button
-                type="button"
-                class="conf-btn"
-                data-name="${wtName}"
-                data-val="${v}"
-                onclick="selectConvincing(this)"
-              >
-                ${v}
-              </button>
-            `;
-      }
-
-      return btns;
-    })()}
-      </div>
-
-      <div class="scale-ends">
-        <div class="scale-end">Mostly the AI assistant's thinking</div>
-        <div class="scale-end right">Mostly my own thinking</div>
-      </div>
-    </div>
-  `;
 }
 
 // Selected-state styling for radio/checkbox option cards.
@@ -4245,30 +4167,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   currentIdx = 0;
   showPage('page-consent');
   updateNav();
-
-  document.querySelectorAll('#page-reflections').forEach(() => { });
-
-  const origNavigate = navigate;
-
-  // Build the reflections content when the reflections page becomes active.
-  const observer = new MutationObserver(() => {
-    const reflPage = document.getElementById('page-reflections');
-
-    if (
-      reflPage &&
-      reflPage.classList.contains('active') &&
-      !reflPage._prepared
-    ) {
-      reflPage._prepared = true;
-      prepareReflectionsPage();
-    }
-  });
-
-  observer.observe(document.body, {
-    attributes: true,
-    subtree: true,
-    attributeFilter: ['class']
-  });
 
   const params = new URLSearchParams(window.location.search);
 

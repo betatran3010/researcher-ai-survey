@@ -144,11 +144,10 @@ function makeRecord(overrides) {
       food_improvement_3: 'Food improvement 3 answer',
       font_convincing: 4,
       food_convincing: 5,
-      confidence_font: 4,
-      confidence_food: 5,
-      understood_font: 'yes',
-      understood_food: 'yes',
-      whose_thinking: 'mostly mine'
+      font_confidence: 4,
+      food_confidence: 5,
+      font_understood: 'yes',
+      food_understood: 'yes'
     },
     quiz_score: 7,
     quiz_paper_scores: { font: 3, food: 4 },
@@ -244,12 +243,12 @@ const recordNoAi = makeRecord({
       'improvement_1', 'improvement_2', 'improvement_3'].forEach((suffix) => {
       delete r['font_' + suffix];
     });
-    delete r.font_convincing; delete r.confidence_font; delete r.understood_font;
+    delete r.font_convincing; delete r.font_confidence; delete r.font_understood;
     return Object.assign(r, {
       listing_strength_1: 'Listing strength 1 answer', listing_strength_2: 'Listing strength 2 answer', listing_strength_3: 'Listing strength 3 answer',
       listing_limitation_1: 'Listing limitation 1 answer', listing_limitation_2: 'Listing limitation 2 answer', listing_limitation_3: 'Listing limitation 3 answer',
       listing_improvement_1: 'Listing improvement 1 answer', listing_improvement_2: 'Listing improvement 2 answer', listing_improvement_3: 'Listing improvement 3 answer',
-      listing_convincing: 3, confidence_listing: 3, understood_listing: 'yes'
+      listing_convincing: 3, listing_confidence: 3, listing_understood: 'yes'
     });
   })()
 });
@@ -311,8 +310,8 @@ test('the unassigned third paper\'s columns are blank, not missing', () => {
     assert.equal(row0['listing_' + suffix], '', 'listing_' + suffix + ' must be blank for the unassigned paper');
   });
   assert.equal(row0.listing_convincing, '');
-  assert.equal(row0.confidence_listing, '');
-  assert.equal(row0.understood_listing, '');
+  assert.equal(row0.listing_confidence, '');
+  assert.equal(row0.listing_understood, '');
   assert.equal(row0.listing_duration_ms, '');
   assert.equal(row0.listing_ai_prompt_count, '0');
   assert.equal(row0.listing_ai_tab_opened, 'FALSE');
