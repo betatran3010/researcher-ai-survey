@@ -1169,8 +1169,9 @@ function finalizeAboutYou() {
 function finalizeStudyTiming(paperId) {
   // Flush and compute the viewport-tracking measures BEFORE duration_ms is
   // touched below -- stopViewportTracking() only writes into
-  // DATA.timing[paperId].{pdf_exposure_proportion_5s,navigation_sequence,
-  // navigation_transition_count,backward_transition_count} and never reads
+  // DATA.timing[paperId].{pdf_exposure_proportion_5s,
+  // region_exposed_5s_count,navigation_sequence,backward_transition_count}
+  // and never reads
   // or sets duration_ms/study_end_ts/study_start_ts, so ordering here only
   // matters for making sure the final (still-open) viewport segment gets
   // closed out using "now" rather than some later timestamp.
@@ -2137,27 +2138,25 @@ function getStudyPdfImages(paperId) {
 //    EXPOSURE_THRESHOLD_MS for pdf_exposure_proportion_5s.
 //  - AOI (Area-of-Interest) Markov-chain navigation models: we
 //    discretize the viewport's vertical position into named
-//    regions and track visits to those regions to compute
-//    navigation_sequence, navigation_transition_count, and
-//    backward_transition_count.
+//    nine within-page regions and track visits to compute
+//    navigation_sequence and backward_transition_count.
 //  - Lagun & Lalmas (2016) preprocessing requirement: an AOI visit
 //    is only retained in the navigation sequence once its
 //    continuous dwell time reaches MIN_DWELL_MS. This is NOT
 //    optional -- a state a participant passed through for under a
 //    second (e.g. while scrolling past it en route elsewhere) is
 //    not a genuine "visit" to that region and must not appear in
-//    navigation_sequence or count toward navigation_transition_count
-//    / backward_transition_count. See aggregateNavigationSequence()
+//    navigation_sequence or backward_transition_count. See aggregateNavigationSequence()
 //    below for the exact 4-step procedure (aggregate consecutive
 //    same-AOI intervals -> drop any whose total is under
 //    MIN_DWELL_MS -> re-collapse newly-adjacent duplicates).
 //
 // IMPLEMENTATION ADAPTATIONS (ours, specific to this split-panel
 // survey -- NOT specified by the cited papers):
-//  1. The discrete region set (Top/Middle/Bottom/Full/Unclassified/
-//     Unrendered) and the "closest anchor within one viewport
-//     height" tie-break rule used to assign a region are our own
-//     deterministic design choices.
+//  1. Each of the three actual rendered PDF pages is divided into
+//     Top/Middle/Bottom, yielding nine ordered regions. The geometry,
+//     overlap-crediting, dominant-state, and hysteresis rules are
+//     study-specific deterministic implementation choices.
 //  2. Exposure-bucket accumulation excludes time when the tab is
 //     hidden or the window is unfocused (seg.visible/seg.focused
 //     below). This does NOT change duration_ms, which still counts
@@ -2170,7 +2169,7 @@ function getStudyPdfImages(paperId) {
 //     (#paperPane-<paperId>), so the measure is independent of pane
 //     height and consistent across window sizes.
 //  4. The MIN_DWELL_MS filter applies only to navigation_sequence /
-//     navigation_transition_count / backward_transition_count. It
+//     backward_transition_count. It
 //     never affects pdf_exposure_proportion_5s, which still credits
 //     a bucket's actual visible/focused milliseconds regardless of
 //     how long any single visit lasted -- a participant who
@@ -2207,8 +2206,36 @@ const EXPOSURE_THRESHOLD_MS = 5000;
 const MAX_EXPOSURE_BUCKETS = 2000;
 const VIEWPORT_HEARTBEAT_MS = 1000;
 const MIN_DWELL_MS = 1000;
+// "Tied or nearly tied" tolerance for dominant-region assignment: the
+// runner-up region is treated as tied with the leader when the gap between
+// their visible-overlap heights is within this fraction of the leader's
+// overlap. Not specified numerically by the governing spec (which only says
+// "tied or nearly tied"); chosen small enough to only catch genuine boundary
+// flicker, not real region changes. Documented here as an explicit,
+// disclosed implementation decision -- see the Phase 3 final report.
+const DOMINANT_REGION_TIE_RATIO = 0.01;
 
 const VIEWPORT_TRACKERS = {};
+
+// Canonical nine-region reading order for a three-page paper, 0-indexed per
+// the governing spec's explicit backward-transition table (P1-Top = 0 ...
+// P3-Bottom = 8). Used only to rank regions for backward-transition
+// counting and first-state tie-breaking; actual region BOUNDARIES always
+// come from the real rendered page geometry (see buildNineRegions below),
+// never from this list.
+const NINE_REGION_ORDER = [
+  'P1-Top', 'P1-Middle', 'P1-Bottom',
+  'P2-Top', 'P2-Middle', 'P2-Bottom',
+  'P3-Top', 'P3-Middle', 'P3-Bottom'
+];
+const NINE_REGION_INDEX = {};
+NINE_REGION_ORDER.forEach((label, i) => { NINE_REGION_INDEX[label] = i; });
+
+// Sentinel, non-navigable states: 'Unrendered' (PDF/page geometry not yet
+// available) and 'Unclassified' (no region had any visible overlap, e.g.
+// the viewport sits entirely in the gap between two stacked page canvases).
+// Neither is a real AOI visit.
+const NON_NAVIGABLE_REGIONS = new Set(['Unrendered', 'Unclassified']);
 
 function getPdfViewportRange(paperId) {
   const pane = document.getElementById('paperPane-' + paperId);
@@ -2226,22 +2253,132 @@ function getPdfViewportRange(paperId) {
   return { contentHeight, viewportHeight, visibleTop, visibleBottom };
 }
 
-function classifyAOI(range) {
-  if (!range) return 'Unrendered';
-  const { contentHeight, viewportHeight, visibleTop } = range;
-  const scrollRange = contentHeight - viewportHeight;
-  if (scrollRange <= 0) return 'Full';
-  const anchors = [
-    { name: 'Top', pos: 0 },
-    { name: 'Middle', pos: scrollRange / 2 },
-    { name: 'Bottom', pos: scrollRange }
-  ];
-  let best = null;
-  for (const anchor of anchors) {
-    const dist = Math.abs(visibleTop - anchor.pos);
-    if (!best || dist < best.dist) best = { name: anchor.name, dist };
+// Reads the ACTUAL rendered per-page canvas boundaries (one <canvas> per
+// PDF page, appended in page order by renderPDF()) in the same
+// wrap-content-relative coordinate space as getPdfViewportRange()'s
+// visibleTop/visibleBottom (i.e. (rect.top - wrapRect.top), which is
+// scroll-position-independent since both the wrap and its canvas children
+// move together when the pane scrolls). Per spec, page boundaries for the
+// nine-region scheme must come from this real geometry, never from
+// dividing the whole multi-page document height into nine equal slices.
+function getPageGeometry(paperId) {
+  const wrap = document.getElementById('pdfWrap-' + paperId);
+  if (!wrap) return [];
+  const wrapRect = wrap.getBoundingClientRect();
+  const canvases = wrap.querySelectorAll ? wrap.querySelectorAll('canvas') : [];
+  const pages = [];
+  for (let i = 0; i < canvases.length; i += 1) {
+    const rect = canvases[i].getBoundingClientRect();
+    pages.push({ top: rect.top - wrapRect.top, bottom: rect.bottom - wrapRect.top });
   }
-  return best.dist <= viewportHeight ? best.name : 'Unclassified';
+  return pages;
+}
+
+// Splits each real rendered page into three equal-height regions (Top /
+// Middle / Bottom), producing the nine ordered P<n>-Top..P<n>-Bottom
+// regions in reading order. Degenerate pages (zero/negative height, e.g. a
+// page whose canvas hasn't actually rendered yet) are skipped rather than
+// producing a malformed region.
+function buildNineRegions(pages) {
+  const names = ['Top', 'Middle', 'Bottom'];
+  const regions = [];
+  for (let p = 0; p < pages.length; p += 1) {
+    const page = pages[p];
+    const height = page.bottom - page.top;
+    if (!(height > 0)) continue;
+    const third = height / 3;
+    for (let n = 0; n < 3; n += 1) {
+      regions.push({
+        label: 'P' + (p + 1) + '-' + names[n],
+        top: page.top + n * third,
+        bottom: n === 2 ? page.bottom : page.top + (n + 1) * third
+      });
+    }
+  }
+  return regions;
+}
+
+// Re-reads page geometry and rebuilds the nine-region list for `paperId`.
+// Safe to call on every viewport-change event (scroll/resize/visibility/
+// focus): re-deriving boundaries from current canvas rects is the only way
+// to stay correct across window resizes (the canvases are CSS
+// width:100%/height:auto, so their on-screen extent changes with the pane).
+// Accumulated per-region exposure (tracker.regionExposedMs) is preserved
+// across a geometry refresh as long as the region COUNT is unchanged (the
+// normal case -- the page count of a given paper never changes mid-task);
+// it is only (re)initialized to zeros the first time geometry becomes
+// available or if the region count itself changes.
+function refreshRegionGeometry(paperId) {
+  const tracker = VIEWPORT_TRACKERS[paperId];
+  if (!tracker) return;
+  const pages = getPageGeometry(paperId);
+  const regions = pages.length ? buildNineRegions(pages) : [];
+  // The finalized study design requires exactly three rendered pages,
+  // yielding exactly nine regions. Partial geometry (e.g. while canvases
+  // are still rendering) is not measurement-ready and must not generate
+  // page/region outcomes.
+  const geometryReady = regions.length === NINE_REGION_ORDER.length;
+  tracker.regions = geometryReady ? regions : [];
+  if (geometryReady && (!tracker.regionExposedMs || tracker.regionExposedMs.length !== regions.length)) {
+    tracker.regionExposedMs = new Array(regions.length).fill(0);
+  }
+  if (!geometryReady) tracker.regionExposedMs = null;
+}
+
+// Picks the single dominant region (largest visible-overlap share) from a
+// parallel `overlaps` array, applying the spec's hysteresis rule: when the
+// runner-up is tied or nearly tied with the leader, retain `previousRegion`
+// if it is one of the tied candidates; otherwise (including the very first
+// assignment, when there is no previous state) deterministically pick the
+// earliest-in-reading-order region among the tied candidates. Returns null
+// when no region has any visible overlap at all (viewport sits in a gap
+// between pages, or off the rendered content).
+function pickDominantRegion(overlaps, regions, previousRegion) {
+  let bestIdx = -1;
+  let bestVal = 0;
+  for (let i = 0; i < overlaps.length; i += 1) {
+    if (overlaps[i] > bestVal) { bestVal = overlaps[i]; bestIdx = i; }
+  }
+  if (bestIdx === -1 || bestVal <= 0) return null;
+
+  const tieThreshold = bestVal * DOMINANT_REGION_TIE_RATIO;
+  const tiedIdxs = [];
+  for (let i = 0; i < overlaps.length; i += 1) {
+    if (overlaps[i] > 0 && (bestVal - overlaps[i]) <= tieThreshold) tiedIdxs.push(i);
+  }
+  if (tiedIdxs.length <= 1) return regions[bestIdx].label;
+
+  if (previousRegion) {
+    for (let i = 0; i < tiedIdxs.length; i += 1) {
+      if (regions[tiedIdxs[i]].label === previousRegion) return previousRegion;
+    }
+  }
+  tiedIdxs.sort((a, b) => a - b);
+  return regions[tiedIdxs[0]].label;
+}
+
+// Computes the single dominant nine-region AOI state for the current
+// viewport `range`, using tracker.regions (refreshed by the caller via
+// refreshRegionGeometry just before this runs). Maintains
+// tracker.lastValidDominantRegion as the rolling hysteresis state across
+// calls -- including across hidden/unfocused intervals, since the
+// visible/focused gating that excludes those intervals from
+// navigation_sequence happens later, in filterNavigableSegments(), not
+// here.
+function computeDominantRegion(paperId, range) {
+  const tracker = VIEWPORT_TRACKERS[paperId];
+  if (!tracker || !tracker.contentReady) return 'Unrendered';
+  const regions = tracker.regions;
+  if (!regions || !regions.length || !range) return 'Unrendered';
+  const overlaps = regions.map((r) =>
+    Math.max(0, Math.min(r.bottom, range.visibleBottom) - Math.max(r.top, range.visibleTop))
+  );
+  const label = pickDominantRegion(overlaps, regions, tracker.lastValidDominantRegion);
+  if (label) {
+    tracker.lastValidDominantRegion = label;
+    return label;
+  }
+  return 'Unclassified';
 }
 
 function numBucketsFor(contentHeight) {
@@ -2262,6 +2399,9 @@ function startViewportTracking(paperId) {
     contentReady: false,
     bucketCount: 0,
     bucketExposedMs: null,
+    regions: [],
+    regionExposedMs: null,
+    lastValidDominantRegion: null,
     rawLog: [],
     stopped: false,
     current: {
@@ -2270,6 +2410,7 @@ function startViewportTracking(paperId) {
       bottom: 0,
       contentHeight: 0,
       viewportHeight: 0,
+      regions: [],
       startedAt: nowTs(),
       openedAt: nowTs(),
       accumulatedMs: 0,
@@ -2331,6 +2472,23 @@ function tickSegment(paperId) {
   if (!contentHeight) return;
   const { start, end } = bucketIndexRange(seg.top, seg.bottom, contentHeight, tracker.bucketCount);
   for (let i = start; i < end; i += 1) tracker.bucketExposedMs[i] += elapsed;
+
+  // Nine-region proportional exposure crediting for region_exposed_5s_count:
+  // each region accumulates this tick's elapsed ms multiplied by the
+  // fraction of that region's own height which is currently visible, so a
+  // viewport straddling the boundary of two regions (e.g. the bottom of one
+  // page and the top of the next) credits both proportionally, per spec.
+  const regions = seg.regions || tracker.regions;
+  if (regions && regions.length && tracker.regionExposedMs && tracker.regionExposedMs.length === regions.length) {
+    for (let i = 0; i < regions.length; i += 1) {
+      const region = regions[i];
+      const regionHeight = region.bottom - region.top;
+      if (!(regionHeight > 0)) continue;
+      const overlap = Math.max(0, Math.min(region.bottom, seg.bottom) - Math.max(region.top, seg.top));
+      if (overlap <= 0) continue;
+      tracker.regionExposedMs[i] += elapsed * (overlap / regionHeight);
+    }
+  }
 }
 
 function updateViewportSegment(paperId) {
@@ -2338,8 +2496,9 @@ function updateViewportSegment(paperId) {
   if (!tracker || tracker.stopped) return;
   tickSegment(paperId);
 
+  refreshRegionGeometry(paperId);
   const range = getPdfViewportRange(paperId);
-  const region = tracker.contentReady ? classifyAOI(range) : 'Unrendered';
+  const region = tracker.contentReady ? computeDominantRegion(paperId, range) : 'Unrendered';
   const visible = document.visibilityState === 'visible';
   const focused = document.hasFocus();
   const seg = tracker.current;
@@ -2423,42 +2582,39 @@ function aggregateNavigationSequence(rawLog) {
   return collapsed;
 }
 
-// Regions that can ever count as a genuine navigation "visit". Unrendered
-// (no PDF content yet) and Unclassified (could not be confidently assigned
-// to a named region) are transient/indeterminate states, not real AOI
-// visits, so they are excluded here -- before MIN_DWELL_MS aggregation ever
-// runs -- rather than being merged/collapsed like a real region would be.
-const NAVIGABLE_REGIONS = new Set(['Top', 'Middle', 'Bottom', 'Full']);
-
 // Drops raw segments that cannot represent genuine attention to a region:
 // hidden-tab time (visible !== true), unfocused-window time (focused !==
-// true), and Unrendered/Unclassified states. This runs BEFORE
-// aggregateNavigationSequence(), so hidden/unfocused/indeterminate dwell
-// time can never inflate navigation_sequence or the transition counts --
-// matching the same visible/focused gating tickSegment() already applies to
-// pdf_exposure_proportion_5s. Returns plain {region, ms} pairs, the input
-// shape aggregateNavigationSequence() expects.
+// true), and Unrendered/Unclassified states (see NON_NAVIGABLE_REGIONS
+// above). This runs BEFORE aggregateNavigationSequence(), so hidden/
+// unfocused/indeterminate dwell time can never inflate navigation_sequence
+// or backward_transition_count -- matching the same visible/focused gating
+// tickSegment() already applies to pdf_exposure_proportion_5s. Returns
+// plain {region, ms} pairs, the input shape aggregateNavigationSequence()
+// expects.
 function filterNavigableSegments(rawLog) {
   return rawLog
-    .filter((seg) => seg.visible === true && seg.focused === true && NAVIGABLE_REGIONS.has(seg.region))
+    .filter((seg) => seg.visible === true && seg.focused === true && !NON_NAVIGABLE_REGIONS.has(seg.region))
     .map((seg) => ({ region: seg.region, ms: seg.duration_ms }));
 }
 
 // Counts forward/backward transitions across an already-aggregated,
-// already-filtered sequence of region names (see aggregateNavigationSequence
-// above). Backward = a transition that moves to an earlier region in the
-// Top(0) -> Middle(1) -> Bottom(2) reading order.
+// already-filtered sequence of nine-region AOI names (see
+// aggregateNavigationSequence above). Backward = a transition whose
+// destination has a LOWER index than its source in the canonical
+// NINE_REGION_INDEX reading order (P1-Top = 0 ... P3-Bottom = 8). Labels not
+// present in NINE_REGION_INDEX (should not occur for the 3-page papers this
+// study uses) are simply never counted as forward or backward, rather than
+// throwing.
 function countNavigationTransitions(sequence) {
   let transitions = 0;
   let backward = 0;
-  const order = { Top: 0, Middle: 1, Bottom: 2 };
   for (let i = 1; i < sequence.length; i += 1) {
     transitions += 1;
     const prev = sequence[i - 1];
     const next = sequence[i];
-    if (Object.prototype.hasOwnProperty.call(order, prev) &&
-      Object.prototype.hasOwnProperty.call(order, next) &&
-      order[next] < order[prev]) {
+    if (Object.prototype.hasOwnProperty.call(NINE_REGION_INDEX, prev) &&
+      Object.prototype.hasOwnProperty.call(NINE_REGION_INDEX, next) &&
+      NINE_REGION_INDEX[next] < NINE_REGION_INDEX[prev]) {
       backward += 1;
     }
   }
@@ -2475,6 +2631,7 @@ function openSegment(paperId, region, range, visible, focused) {
     bottom: range ? range.visibleBottom : 0,
     contentHeight: range ? range.contentHeight : 0,
     viewportHeight: range ? range.viewportHeight : 0,
+    regions: tracker.regions,
     startedAt: now,
     openedAt: now,
     accumulatedMs: 0,
@@ -2510,8 +2667,14 @@ function stopViewportTracking(paperId) {
   if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
   const navigable = filterNavigableSegments(tracker.rawLog);
   const collapsed = aggregateNavigationSequence(navigable);
-  const { transitions, backward } = countNavigationTransitions(collapsed);
+  const { backward } = countNavigationTransitions(collapsed);
 
+  // pdf_exposure_proportion_5s: unchanged document-wide bucket calculation
+  // (strict ">5000ms", full rendered content height, visible+focused-gated)
+  // -- this variable's definition did not change between the Phase 2 and
+  // final Phase 3 specs. Blank only when the PDF/page never finished
+  // rendering (tracker.contentReady false or zero buckets); a genuine
+  // measured 0 is preserved.
   let exposureProportion = '';
   if (tracker.contentReady && tracker.bucketExposedMs && tracker.bucketExposedMs.length) {
     // Strict ">" per spec ("viewport time longer than 5 seconds"): a bucket
@@ -2523,10 +2686,25 @@ function stopViewportTracking(paperId) {
     exposureProportion = Number((exposedCount / tracker.bucketExposedMs.length).toFixed(4));
   }
 
+  // region_exposed_5s_count: blank only when real page/PDF geometry never
+  // became available (tracker.regions empty); a genuine 0 (no region ever
+  // crossed the threshold) is preserved.
+  let regionExposedCount = '';
+  if (tracker.regions && tracker.regions.length && tracker.regionExposedMs && tracker.regionExposedMs.length === tracker.regions.length) {
+    regionExposedCount = tracker.regionExposedMs.reduce(
+      (count, ms) => count + (ms > EXPOSURE_THRESHOLD_MS ? 1 : 0),
+      0
+    );
+  }
+
+  // navigation_sequence / backward_transition_count: blank only when no
+  // valid region survived the visible/focused/min-dwell preprocessing
+  // pipeline (collapsed.length === 0) -- a single retained state with zero
+  // transitions is a genuine, measured "0", not a blank.
   DATA.timing[paperId].pdf_exposure_proportion_5s = exposureProportion;
-  DATA.timing[paperId].navigation_sequence = collapsed.join('>');
-  DATA.timing[paperId].navigation_transition_count = transitions;
-  DATA.timing[paperId].backward_transition_count = backward;
+  DATA.timing[paperId].region_exposed_5s_count = regionExposedCount;
+  DATA.timing[paperId].navigation_sequence = collapsed.length ? collapsed.join('>') : '';
+  DATA.timing[paperId].backward_transition_count = collapsed.length ? backward : '';
 
   if (!DATA.viewport_raw_log) DATA.viewport_raw_log = {};
   DATA.viewport_raw_log[paperId] = tracker.rawLog;
