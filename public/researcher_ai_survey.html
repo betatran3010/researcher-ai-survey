@@ -553,6 +553,19 @@
       opacity: .55;
     }
 
+    .q-card.locked-question {
+      position: relative;
+    }
+
+    .q-card.locked-question::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(90, 100, 115, .16);
+      border-radius: 20px;
+      pointer-events: none;
+    }
+
     .scale-ends {
       display: flex;
       justify-content: space-between;

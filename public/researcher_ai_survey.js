@@ -2054,13 +2054,17 @@ function selectConvincing(btn) {
   const name = btn.getAttribute('data-name');
   const scale = document.querySelector(`.conf-scale[data-name="${name}"]`);
   if (scale && scale.classList.contains('locked')) {
-    alert("You can't change your response.");
+    showWarnBanner("You can't change your response.");
     return;
   }
   document.querySelectorAll(`.conf-btn[data-name="${name}"]`).forEach(b => b.classList.remove('selected'));
   btn.classList.add('selected');
   DATA.responses[name] = parseInt(btn.getAttribute('data-val'), 10);
-  if (scale) scale.classList.add('locked');
+  if (scale) {
+    scale.classList.add('locked');
+    const card = scale.closest('.q-card');
+    if (card) card.classList.add('locked-question');
+  }
 }
 
 function renderStudyPdfIfNeeded(paperId) {
@@ -4172,6 +4176,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   currentIdx = 0;
   showPage('page-consent');
   updateNav();
+
 
   const params = new URLSearchParams(window.location.search);
 
