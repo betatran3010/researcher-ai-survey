@@ -3128,36 +3128,132 @@ function validateNumberInputImmediately(input) {
 }
 
 function initializeImmediateNumberValidation() {
-  // Validate only after the participant leaves the number field.
-  // This avoids showing an error while they are still typing, such as
-  // briefly entering "2" before completing "20".
+  function isNumberInput(input) {
+    return (
+      input &&
+      input.tagName === 'INPUT' &&
+      input.type === 'number'
+    );
+  }
+
+  function allowsDecimal(input) {
+    return input.step === '0.5' || input.step === 'any';
+  }
+
+  function isPermittedNumberText(input, value) {
+    if (value === '') return true;
+
+    if (allowsDecimal(input)) {
+      // Allows nonnegative whole numbers or decimals, such as 2, 2.5, or .5.
+      return /^(?:\d+\.?\d*|\.\d*)$/.test(value);
+    }
+
+    // Integer-only fields.
+    return /^\d+$/.test(value);
+  }
+
+  // Block characters that browsers may otherwise allow in number fields,
+  // including exponent notation and signs.
+  document.addEventListener('keydown', event => {
+    const input = event.target;
+    if (!isNumberInput(input)) return;
+
+    const blockedKeys = ['e', 'E', '+', '-'];
+
+    if (
+      blockedKeys.includes(event.key) ||
+      (event.key === '.' && !allowsDecimal(input))
+    ) {
+      event.preventDefault();
+    }
+  });
+
+  // Validate pasted and inserted text before it enters the field.
+  document.addEventListener('beforeinput', event => {
+    const input = event.target;
+    if (!isNumberInput(input)) return;
+
+    // Deletions, undo, and similar editing operations should remain allowed.
+    if (!event.inputType || !event.inputType.startsWith('insert')) return;
+
+    const insertedText = event.data;
+
+    // Paste is handled separately below because event.data can be null.
+    if (insertedText == null) return;
+
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+
+    const proposedValue =
+      input.value.slice(0, start) +
+      insertedText +
+      input.value.slice(end);
+
+    if (!isPermittedNumberText(input, proposedValue)) {
+      event.preventDefault();
+    }
+  });
+
+  // Reject invalid pasted content rather than allowing the browser to
+  // partially interpret or silently clear it.
+  document.addEventListener('paste', event => {
+    const input = event.target;
+    if (!isNumberInput(input)) return;
+
+    const pastedText = event.clipboardData
+      ? event.clipboardData.getData('text').trim()
+      : '';
+
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+
+    const proposedValue =
+      input.value.slice(0, start) +
+      pastedText +
+      input.value.slice(end);
+
+    if (!isPermittedNumberText(input, proposedValue)) {
+      event.preventDefault();
+      showNumberInputError(
+        input,
+        allowsDecimal(input)
+          ? 'Please enter numbers only, rounded to the nearest half hour.'
+          : 'Please enter whole numbers only.'
+      );
+    }
+  });
+
+  // Validate the completed response when the participant leaves the field.
   document.addEventListener(
     'blur',
     event => {
       const input = event.target;
 
-      if (
-        input &&
-        input.tagName === 'INPUT' &&
-        input.type === 'number'
-      ) {
+      if (isNumberInput(input)) {
         validateNumberInputImmediately(input);
       }
     },
     true
   );
 
-  // Once an error is already visible, remove it as soon as the participant
-  // corrects the value.
+  // Remove an existing error as soon as the participant corrects the value.
   document.addEventListener('input', event => {
     const input = event.target;
+    if (!isNumberInput(input)) return;
+
+    const value = String(input.value || '').trim();
 
     if (
-      input &&
-      input.tagName === 'INPUT' &&
-      input.type === 'number' &&
-      input.classList.contains('input-error')
+      value !== '' &&
+      !isPermittedNumberText(input, value)
     ) {
+      input.value = value.replace(
+        allowsDecimal(input) ? /[^\d.]/g : /\D/g,
+        ''
+      );
+    }
+
+    if (input.classList.contains('input-error')) {
       const message = getNumberInputError(input);
 
       if (!message) {
