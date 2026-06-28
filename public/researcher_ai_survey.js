@@ -369,7 +369,7 @@ const STANDARD_Q_DEFS = [
     ]
   },
   {
-    suffix: 'understood', type: 'scale7', label: 'How well do you feel you understood this study?',
+    suffix: 'understood', type: 'scale7', label: 'How well do you feel you understood this paper?',
     scaleEndLow: 'Not at all well', scaleEndHigh: 'Completely well'
   },
   {
