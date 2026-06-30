@@ -1802,9 +1802,7 @@
       <div class="q-card intro-card">
         <h2>Before we begin</h2>
         <p class="muted">This is a study about how researchers and research trainees evaluate scientific claims and
-          reason about evidence. The study also includes questions about AI assistants, meaning conversational tools
-          such as ChatGPT, Claude, Gemini, Copilot, and similar products that you can ask questions or give tasks to in
-          plain language.</p>
+          reason about evidence.</p>
         <p class="muted" style="margin-top:10px;">The study takes approximately <span
             id="officialEstimatedDurationIntro">30&ndash;45 minutes</span>.</p>
         <p class="muted" id="officialAlertnessNote"><strong>This study involves sustained reading and evaluation of
@@ -1816,11 +1814,6 @@
         <label class="input-label" style="font-size:.9rem;font-weight:600;color:var(--text);">Prolific ID</label>
         <input type="text" id="prolific_id" placeholder="Enter your Prolific ID" required style="margin-top:8px;">
         <div class="error-hint" id="prolificErrorHint">Required to proceed.</div>
-      </div>
-
-      <div class="q-card secondary">
-        <div class="q-label">Have you used at least one of the AI assistants described above?</div>
-        <div class="options-grid" id="rg-familiar"></div>
       </div>
 
       <div class="consent-box">
@@ -1904,7 +1897,7 @@
         </label>
       </div>
 
-      <div id="consent-error" class="error-hint">Please answer all questions and check both boxes above to continue.
+      <div id="consent-error" class="error-hint">Please enter your Prolific ID and confirm consent to continue.
       </div>
 
       <div style="margin-top:20px;display:flex;gap:12px;align-items:center;">
@@ -1914,12 +1907,12 @@
     </div>
   </div>
 
-  <!-- ============ EXIT SCREEN (decline / not familiar with AI) ============ -->
+  <!-- ============ EXIT SCREEN (declined consent) ============ -->
   <div class="page survey-page" id="page-exit">
     <div class="exit-screen">
       <h2>Thank you for your interest.</h2>
-      <p>You have chosen not to participate in this study, or you indicated that you are not familiar with AI
-        assistants. No action is required on your part. We appreciate you taking the time to read this information.</p>
+      <p>You have chosen not to participate in this study. No action is required on your part. We appreciate you
+        taking the time to read this information.</p>
     </div>
   </div>
 
@@ -1969,31 +1962,41 @@
       <div class="section-number" id="secnum-srl">2</div>
       <div class="section-title">How You Approach Research Work</div>
     </div>
-    <p class="muted" style="margin-bottom:16px;">Please indicate how well each statement describes the way you typically
-      approach scholarly work related to research. Answer based on how you usually behave, not how you think you should
-      behave. There are no right or wrong answers.</p>
+    <p class="muted" style="margin-bottom:16px;">Please indicate how well each statement describes how you typically
+      approach research work. Answer based on how you usually behave, not how you think you should behave.</p>
     <div class="q-card" id="srlWrap"></div>
   </div>
 
-  <!-- ============ CRITICAL-THINKING SCALE (shared template, placed pre or post) ============ -->
+  <!-- ============ GENERAL CRITICAL THINKING (counterbalanced pre/post) ============ -->
   <div class="page survey-page" id="page-ct">
     <div class="section-label">
-      <div class="section-number" id="secnum-ct">3</div>
+      <div class="section-number" id="secnum-ct">4</div>
       <div class="section-title">How You Evaluate Research Claims</div>
     </div>
     <div id="ctIntroText"></div>
     <div class="q-card" id="ctWrap"></div>
   </div>
 
-  <!-- ============ 4. EXPERIENCE WITH AI ASSISTANTS IN RESEARCH ============ -->
-  <div class="page survey-page" id="page-ai-experience">
+  <!-- ============ 4. AI RESEARCH-USE ROUTING QUESTION ============ -->
+  <div class="page survey-page" id="page-ai-use-gate">
     <div class="section-label">
-      <div class="section-number" id="secnum-ai-experience">4</div>
+      <div class="section-number" id="secnum-ai-use-gate">3</div>
       <div class="section-title">Experience with AI Assistants in Research</div>
     </div>
+    <p class="muted" style="margin-bottom:16px;">The following questions ask about your experience using AI assistants
+      for research work. “AI assistants” refers to conversational tools such as ChatGPT, Claude, Gemini, Copilot, and
+      similar products that you can ask questions or give tasks to in plain language.</p>
     <div class="q-card">
-      <div class="q-label">For which research-related purposes do you use AI assistants? Select all that apply.</div>
-      <div class="options-grid" id="rg-ai-purpose"></div>
+      <div class="q-label">Have you used at least one of the AI assistants described above for research work?</div>
+      <div class="options-grid" id="rg-ai-research-use"></div>
+    </div>
+  </div>
+
+  <!-- ============ CONDITIONAL AI EXPERIENCE QUESTIONS ============ -->
+  <div class="page survey-page" id="page-ai-experience">
+    <div class="section-label">
+      <div class="section-number" id="secnum-ai-experience">3</div>
+      <div class="section-title">Experience with AI Assistants in Research</div>
     </div>
     <div class="q-card">
       <div class="q-label">How long have you been using AI assistants for research regularly?</div>
@@ -2006,17 +2009,30 @@
       <input type="number" step="0.5" min="0" max="100" id="ai_hours_per_week">
     </div>
     <div class="q-card">
+      <div class="q-label">For which research-related purposes do you use AI assistants? Select all that apply.</div>
+      <div class="options-grid" id="rg-ai-purpose"></div>
+    </div>
+    <div class="q-card">
       <div class="q-label">How would you describe your understanding of how AI assistants work?</div>
       <div class="options-grid" id="rg-ai-understanding"></div>
     </div>
   </div>
 
+  <!-- ============ CONDITIONAL AI-SPECIFIC EVALUATION ============ -->
+  <div class="page survey-page" id="page-ai-evaluation">
+    <div class="section-label">
+      <div class="section-number" id="secnum-ai-evaluation">5</div>
+      <div class="section-title">How You Use AI When Evaluating Research Papers</div>
+    </div>
+    <div id="aiEvaluationIntroText"></div>
+    <div class="q-card" id="aiEvaluationWrap"></div>
+  </div>
+
   <!-- ============ 5. TASK INSTRUCTIONS (built dynamically, one section per page) ============ -->
   <div id="instructionsPagesContainer"></div>
 
-  <!-- ============ STUDY SLOTS (filled dynamically; participants see 2 of the 3 pool papers) ============ -->
+  <!-- ============ SINGLE ASSIGNED STUDY SLOT ============ -->
   <div class="page study-page" id="page-study-1"></div>
-  <div class="page study-page" id="page-study-2"></div>
 
   <!-- ============ QUIZ TRANSITION ============ -->
   <div class="page" id="page-quiz-intro">

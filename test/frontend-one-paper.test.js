@@ -6,3 +6,36 @@ test('frontend consumes unassigned_paper_ids plural',()=>{assert.match(src,/data
 test('participant instructions use one-study wording',()=>{assert.match(src,/You will now read one short research study\./);assert.doesNotMatch(src,/You will now read two short research studies/);});
 test('test-mode paper override requires one paper',()=>{assert.match(src,/papers\.length === 1/);});
 test('server autosave endpoint and 30-second dirty save are wired',()=>{assert.match(src,/\/api\/save-progress/);assert.match(src,/setInterval\(\(\) => \{ if \(autosaveDirty\) saveProgressNow\(\); \}, 30000\)/);});
+
+test('consent page no longer contains old AI familiarity screen or early-exit logic',()=>{
+  const html=fs.readFileSync(path.join(__dirname,'..','public','researcher_ai_survey.html'),'utf8');
+  assert.doesNotMatch(html,/id="rg-familiar"/);
+  assert.doesNotMatch(src,/not_familiar_with_ai/);
+});
+test('revised SRL items use construct-named keys in exact order',()=>{
+  const keys=[
+    'srl_goal_setting','srl_strategic_planning','srl_task_strategies',
+    'srl_elaboration','srl_self_evaluation','srl_help_seeking'
+  ];
+  let last=-1;
+  for(const key of keys){
+    const i=src.indexOf(`'${key}'`);
+    assert.ok(i>last,`${key} should appear in order`);
+    last=i;
+  }
+});
+test('AI research-use gate controls conditional pages without changing assignment request',()=>{
+  assert.match(src,/const order = \['page-consent', 'page-about-you', 'page-srl', 'page-ai-use-gate'\]/);
+  assert.match(src,/if \(hasAiUse\) \{\s*order\.push\('page-ai-experience'\)/);
+  assert.match(src,/if \(hasAiUse\) order\.push\('page-ai-evaluation'\)/);
+  assert.match(src,/body: JSON\.stringify\(\{\s*stable_participant_id: stableId,\s*research_role: effectiveRole/);
+  assert.doesNotMatch(src,/assign-condition[\s\S]{0,300}ai_research_use/);
+});
+test('general CT is always included and AI evaluation follows it when applicable',()=>{
+  assert.match(src,/order\.push\('page-ct'\);\s*if \(hasAiUse\) order\.push\('page-ai-evaluation'\)/);
+});
+test('AI gate clears skipped conditional responses and rebuilds page order',()=>{
+  assert.match(src,/function clearConditionalAiResponses\(\)/);
+  assert.match(src,/if \(value === 'No'\) clearConditionalAiResponses\(\)/);
+  assert.match(src,/if \(curId === 'page-ai-use-gate' && dir > 0\)/);
+});

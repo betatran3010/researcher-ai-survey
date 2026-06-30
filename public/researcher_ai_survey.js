@@ -47,7 +47,7 @@ const DATA = {
   consent: false,
   consent_status: null,        // 'granted' | 'declined'
   media_release_status: null,  // 'granted' | 'declined'
-  screening_exit_reason: null, // 'not_familiar_with_ai' | 'declined_consent' | null
+  screening_exit_reason: null, // 'declined_consent' | null
   completion_status: 'in_progress', // 'in_progress' | 'completed' | 'exited_early'
   final_submission_timestamp: null,
 
@@ -187,179 +187,78 @@ const UNDERSTANDING_OPTIONS = [
   'I understand it technically. I work with or study AI systems.'
 ];
 
-// SRL — 21 items, 6 categories (verbatim from spec)
+// SRL — one item per construct, in the participant-facing order.
 const SRL_ITEMS = [
-  // Goal Setting
-  [
-    'srl_goal_standards',
-    'I set personal standards for the quality of my research work.',
-    'goal_setting'
-  ],
-  [
-    'srl_goal_shortlong',
-    'I do not usually set short-term goals for what I want to accomplish in a specific research task or longer-term goals for the overall project.',
-    'goal_setting'
-  ],
-  [
-    'srl_goal_deadlines',
-    'I set realistic deadlines for completing research work.',
-    'goal_setting'
-  ],
-
-  // Strategic Planning
-  [
-    'srl_plan_questions',
-    'I often begin a research task without first considering what I need to understand or evaluate.',
-    'strategic_planning'
-  ],
-  [
-    'srl_plan_alternatives',
-    'I think of alternative ways to approach a research problem and choose the one that seems most useful.',
-    'strategic_planning'
-  ],
-  [
-    'srl_plan_adapt',
-    'When planning my research work, I do not usually use or adapt strategies that have worked for me in the past.',
-    'strategic_planning'
-  ],
-  [
-    'srl_plan_organize',
-    'I organize my time and resources to accomplish my research goals to the best of my ability.',
-    'strategic_planning'
-  ],
-
-  // Task Strategies
-  [
-    'srl_task_ownwords',
-    'I try to translate new information into my own words.',
-    'task_strategies'
-  ],
-  [
-    'srl_task_change',
-    'I continue using the same strategy even when it is not helping me make progress.',
-    'task_strategies'
-  ],
-  [
-    'srl_task_notes',
-    'When working on research tasks, I make notes to help organize my thoughts.',
-    'task_strategies'
-  ],
-  [
-    'srl_task_examples',
-    'I rarely create my own examples or interpretations to make information more meaningful.',
-    'task_strategies'
-  ],
-
-  [
-    'attention_check',
-    'Please select 2 for this item.',
-    'attention_check'
-  ],
-
-  // Elaboration
-  [
-    'srl_elab_relate',
-    'When learning something new, I try to relate it to what I already know.',
-    'elaboration'
-  ],
-  [
-    'srl_elab_combine',
-    'When learning something new, I rarely combine information across different sources, such as papers, prior readings, AI tools, websites, or other materials.',
-    'elaboration'
-  ],
-  [
-    'srl_elab_prior',
-    'I draw on my prior knowledge and research experience when interpreting new information.',
-    'elaboration'
-  ],
-
-  // Self-Evaluation
-  [
-    'srl_eval_know',
-    'After finishing a research task, I am often unsure how well I understand the material.',
-    'self_evaluation'
-  ],
-  [
-    'srl_eval_different',
-    'After finishing a research task, I consider whether the task could be approached differently.',
-    'self_evaluation'
-  ],
-  [
-    'srl_eval_learned',
-    'I rarely think about what I have learned after I finish a research task.',
-    'self_evaluation'
-  ],
-
-  // Help Seeking
-  [
-    'srl_help_clarification',
-    'I rarely ask other people or AI for help when I do not understand something.',
-    'help_seeking'
-  ],
-  [
-    'srl_help_identify',
-    'I try to identify people or sources I can ask for help if necessary.',
-    'help_seeking'
-  ],
-  [
-    'srl_help_information',
-    'I ask other people or AI for additional information when I need it.',
-    'help_seeking'
-  ],
-  [
-    'srl_help_own_r',
-    'Even when I am having trouble understanding something, I prefer to work through it on my own rather than asking for help.',
-    'help_seeking'
-  ]
+  ['srl_goal_setting', 'I set specific goals for what I want to accomplish in my research work.'],
+  ['srl_strategic_planning', 'I begin a research task before deciding how I will approach it.'],
+  ['srl_task_strategies', 'I adjust how I organize my time and tasks when my current approach is not helping me make progress.'],
+  ['srl_elaboration', 'When learning something new, I connect it with what I already know to make it more meaningful and memorable.'],
+  ['srl_self_evaluation', 'I rarely compare my research work against the standards or goals I have set for it.'],
+  ['srl_help_seeking', 'When I need help with a research task, I seek assistance from other people or consult additional tools and sources.']
 ];
-// Critical-Thinking scale — 6 items (verbatim), shared by pre/post placement
+
+// General critical-thinking items. The attention check is administered here
+// but excluded from the substantive composite in the export layer.
 const CT_ITEMS_LIST = [
   {
     key: 'ct_credibility',
-    label:
-      'I critically evaluate the credibility of the sources of information I encounter.'
+    label: 'I critically evaluate the credibility of the sources of information I encounter.'
+  },
+  {
+    key: 'ct_understand_vs_judge',
+    label: 'When reading a paper, I distinguish between what I need to understand and what I need to judge.'
   },
   {
     key: 'ct_evidence',
-    label:
-      'I sometimes accept a conclusion without carefully checking whether the evidence supports it.'
+    label: 'I sometimes accept a conclusion without checking whether the evidence supports it.'
   },
   {
     key: 'ct_alternatives',
-    label:
-      'I consider alternative explanations before accepting a research claim.'
+    label: 'I consider alternative explanations before accepting a research claim.'
   },
   {
-    key: 'ct_bias',
-    label:
-      'I rarely reflect on possible biases in my own thinking when making judgments.'
+    key: 'ct_weaknesses',
+    label: 'I look for weaknesses or limitations in the evidence before accepting a claim.'
   },
   {
-    key: 'ct_assumptions',
-    label:
-      'I question the assumptions underlying information or suggestions provided by AI tools.'
-  },
-  {
-    key: 'ct_alternatives_repeat',
-    label:
-      'I consider alternative explanations before accepting a research claim.'
-  },
-  {
-    key: 'ct_compare',
-    label:
-      'I rely on AI-generated information or recommendations without comparing them with other sources.'
+    key: 'attention_check',
+    label: 'Please select 2 for this item.'
   }
 ];
 
-// The critical-thinking items are identical in the pre- and post-task
-// placements, but the introductory wording differs by placement.
-const CT_INTRO_PRE = [
-  'Please indicate how well each statement describes the way you typically evaluate research claims, evidence, or explanations. Answer based on how you usually behave, not how you think you should behave. There are no right or wrong answers.'
+const AI_EVALUATION_ITEMS = [
+  {
+    key: 'ai_eval_summarize_clarify',
+    label: 'I use AI tools to summarize or clarify text.'
+  },
+  {
+    key: 'ai_eval_before_own_judgment',
+    label: 'I use AI tools before forming my own judgment about a paper.'
+  },
+  {
+    key: 'ai_eval_question_assumptions',
+    label: 'I question the assumptions underlying information or suggestions provided by AI tools.'
+  },
+  {
+    key: 'ai_eval_rely_without_comparing',
+    label: 'I rely on AI-generated information or recommendations without comparing them with other sources.'
+  },
+  {
+    key: 'ai_eval_bias_concern',
+    label: 'I worry that AI tools could bias my judgment of a paper if I rely on them too early.'
+  },
+  {
+    key: 'ai_eval_question_assumptions_repeat',
+    label: 'I question the assumptions underlying information or suggestions provided by AI tools.'
+  }
 ];
 
-const CT_INTRO_POST = [
-  'Before finishing, we would like to ask a few general questions about how you typically evaluate research information.',
-  'The following questions ask about your general habits when evaluating research claims, evidence, and explanations. Please answer based on how you usually approach these kinds of tasks, rather than only on the study you completed today or how you think you should respond. There are no right or wrong answers.'
+const CT_INTRO = [
+  'Please indicate how well each statement describes how you typically evaluate research claims, evidence, or explanations. Answer based on how you usually behave, not how you think you should behave.'
+];
+
+const AI_EVALUATION_INTRO = [
+  'Please indicate how well each statement describes how you typically use AI tools when evaluating research papers or research-related information. Answer based on how you usually behave, not how you think you should behave.'
 ];
 
 const CT_SCALE_NOTE = '1 = Not at all true for me, 7 = Very true for me';
@@ -661,14 +560,22 @@ let currentIdx = 0;
 let QUIZ_PAGE_IDS = [];
 let INSTRUCTIONS_PAGE_IDS = [];
 
+function hasPriorResearchAiUse() {
+  return DATA.responses.ai_research_use === 'Yes';
+}
+
 function buildPageOrder() {
-  const order = ['page-consent', 'page-about-you', 'page-srl'];
+  const order = ['page-consent', 'page-about-you', 'page-srl', 'page-ai-use-gate'];
+  const hasAiUse = hasPriorResearchAiUse();
+
+  if (hasAiUse) {
+    order.push('page-ai-experience');
+  }
 
   if (DATA.ct_scale_placement === 'pre') {
     order.push('page-ct');
+    if (hasAiUse) order.push('page-ai-evaluation');
   }
-
-  order.push('page-ai-experience');
 
   if (INSTRUCTIONS_PAGE_IDS.length > 0) {
     order.push(...INSTRUCTIONS_PAGE_IDS);
@@ -678,6 +585,7 @@ function buildPageOrder() {
 
   if (DATA.ct_scale_placement === 'post') {
     order.push('page-ct');
+    if (hasAiUse) order.push('page-ai-evaluation');
   }
 
   order.push('page-quiz-intro');
@@ -690,9 +598,15 @@ function buildPageOrder() {
 
 function applySectionNumbers() {
   const pre = DATA.ct_scale_placement === 'pre';
+  const hasAiUse = hasPriorResearchAiUse();
   const map = pre
-    ? { about_you: 1, srl: 2, ct: 3, ai_experience: 4, task: 5, quiz: 6, debrief: 7 }
-    : { about_you: 1, srl: 2, ai_experience: 3, task: 4, ct: 5, quiz: 6, debrief: 7 };
+    ? (hasAiUse
+      ? { about_you: 1, srl: 2, ai_use_gate: 3, ai_experience: 3, ct: 4, ai_evaluation: 5, task: 6, quiz: 7, debrief: 8 }
+      : { about_you: 1, srl: 2, ai_use_gate: 3, ct: 4, task: 5, quiz: 6, debrief: 7 })
+    : (hasAiUse
+      ? { about_you: 1, srl: 2, ai_use_gate: 3, ai_experience: 3, task: 4, ct: 5, ai_evaluation: 6, quiz: 7, debrief: 8 }
+      : { about_you: 1, srl: 2, ai_use_gate: 3, task: 4, ct: 5, quiz: 6, debrief: 7 });
+
   Object.keys(map).forEach(k => {
     const el = document.getElementById('secnum-' + k.replace(/_/g, '-'));
     if (el) el.textContent = map[k];
@@ -1094,7 +1008,7 @@ async function navigate(dir) {
   if (navigateInFlight) return;
   if (!validateCurrentPage()) return;
   const curId = getCurrentPageId();
-  const idx = pageOrder.indexOf(curId);
+  let idx = pageOrder.indexOf(curId);
   if (curId === 'page-debrief' && dir > 0) {
     finalizeSubmission();
     return;
@@ -1117,6 +1031,12 @@ async function navigate(dir) {
   }
 
   collectFieldsNow();
+
+  if (curId === 'page-ai-use-gate' && dir > 0) {
+    if (DATA.responses.ai_research_use === 'No') clearConditionalAiResponses();
+    buildPageOrder();
+    idx = pageOrder.indexOf(curId);
+  }
 
   if (curId === 'page-about-you' && dir > 0) {
     // Gate: do not allow the participant to proceed until the server has
@@ -1469,25 +1389,7 @@ function renderRadioGroup(containerId, name, options, getLabel, type) {
 }
 
 function initConsentPage() {
-  renderRadioGroup(
-    'rg-familiar',
-    'familiar',
-    ['Yes', 'No, I have not heard of or used any of these']
-  );
-
-  document.querySelectorAll('input[name="familiar"]').forEach(input => {
-    input.addEventListener('change', event => {
-      if (event.target.value.startsWith('No')) {
-        DATA.responses.familiar = event.target.value;
-        DATA.responses.exit_reason = 'not_familiar_with_ai';
-        DATA.screening_exit_reason = 'not_familiar_with_ai';
-        DATA.completion_status = 'exited_early';
-        DATA.session_end_iso = nowIso();
-
-        showExitScreen();
-      }
-    });
-  });
+  // No AI-familiarity screening is administered on the consent page.
 }
 
 function showExitScreen() {
@@ -1511,7 +1413,6 @@ function declineConsent() {
 function submitConsentPage() {
   const prolific = document.getElementById('prolific_id').value.trim();
   const prolificHint = document.getElementById('prolificErrorHint');
-  const familiar = document.querySelector('input[name="familiar"]:checked');
   const consentCb = document.getElementById('consent-cb');
   const mediaCb = document.getElementById('media-cb');
   const errEl = document.getElementById('consent-error');
@@ -1525,10 +1426,6 @@ function submitConsentPage() {
     document.getElementById('prolific_id').classList.remove('input-error');
     if (prolificHint) prolificHint.style.display = 'none';
   }
-  if (!familiar) {
-    flagGroupError(document.getElementById('rg-familiar'));
-    ok = false;
-  }
   if (!consentCb.checked) {
     ok = false;
   }
@@ -1538,13 +1435,6 @@ function submitConsentPage() {
   }
   if (errEl) errEl.style.display = 'none';
 
-  if (familiar.value.startsWith('No')) {
-    DATA.screening_exit_reason = 'not_familiar_with_ai';
-    DATA.completion_status = 'exited_early';
-    DATA.session_end_iso = nowIso();
-    showExitScreen();
-    return;
-  }
 
   DATA.prolific_id = prolific;
   DATA.consent = true;
@@ -1598,6 +1488,49 @@ function renderScale7Block(containerId, items, leftLab, rightLab, append) {
 }
 
 // ---------- About You / SRL / CT / AI Experience rendering ----------
+function clearConditionalAiResponses() {
+  [
+    'ai_tenure',
+    'ai_hours_per_week',
+    'ai_purpose',
+    'ai_purpose_specify',
+    'ai_purpose_other',
+    'ai_understanding',
+    'ai_eval_summarize_clarify',
+    'ai_eval_before_own_judgment',
+    'ai_eval_question_assumptions',
+    'ai_eval_rely_without_comparing',
+    'ai_eval_bias_concern',
+    'ai_eval_question_assumptions_repeat'
+  ].forEach(key => { delete DATA.responses[key]; });
+
+  const hours = document.getElementById('ai_hours_per_week');
+  if (hours) hours.value = '';
+  document.querySelectorAll(
+    'input[name="ai_tenure"], input[name="ai_purpose"], input[name="ai_understanding"]'
+  ).forEach(input => {
+    input.checked = false;
+    const label = input.closest('.option-item');
+    if (label) label.classList.remove('selected');
+  });
+  document.querySelectorAll('#page-ai-evaluation .likert-btn')
+    .forEach(button => button.classList.remove('selected'));
+
+  const specify = document.getElementById('rg-ai-purpose-specify');
+  if (specify) {
+    specify.value = '';
+    specify.style.display = 'none';
+  }
+}
+
+function handleAiResearchUseChange(value) {
+  DATA.responses.ai_research_use = value;
+  if (value === 'No') clearConditionalAiResponses();
+  buildPageOrder();
+  markAutosaveDirty();
+  scheduleAutosave();
+}
+
 function renderAllSections() {
   // About You
   renderRadioGroup('rg-ay-lang', 'lang', LANG_OPTIONS);
@@ -1609,22 +1542,17 @@ function renderAllSections() {
   // SRL
   renderScale7Block(
     'srlWrap',
-    SRL_ITEMS.map(([k, l]) => [k, l]),
+    SRL_ITEMS,
     'Not at all true for me',
     'Very true for me'
   );
 
-  // Critical-Thinking shared template
+  // General critical thinking
   const ctIntroEl = document.getElementById('ctIntroText');
   if (ctIntroEl) {
-    const introParagraphs =
-      DATA.ct_scale_placement === 'pre'
-        ? CT_INTRO_PRE
-        : CT_INTRO_POST;
-
-    ctIntroEl.innerHTML = introParagraphs
+    ctIntroEl.innerHTML = CT_INTRO
       .map((text, index) => `
-        <p class="muted" style="margin-bottom:${index === introParagraphs.length - 1 ? '16px' : '10px'};">
+        <p class="muted" style="margin-bottom:${index === CT_INTRO.length - 1 ? '16px' : '10px'};">
           ${escapeHtml(text)}
         </p>
       `)
@@ -1638,12 +1566,35 @@ function renderAllSections() {
     'Very true for me'
   );
 
-  // AI Experience
+  // AI-use routing page
+  renderRadioGroup('rg-ai-research-use', 'ai_research_use', ['Yes', 'No']);
+  document.querySelectorAll('input[name="ai_research_use"]').forEach(input => {
+    input.addEventListener('change', event => handleAiResearchUseChange(event.target.value));
+  });
+
+  // Conditional AI Experience
   renderRadioGroup('rg-ai-purpose', 'ai_purpose', AI_PURPOSE_OPTIONS, o => o.l, 'checkbox');
   setupSpecifyField('rg-ai-purpose', 'ai_purpose', 'Other');
   renderRadioGroup('rg-ai-tenure', 'ai_tenure', TENURE_OPTIONS);
   renderRadioGroup('rg-ai-understanding', 'ai_understanding', UNDERSTANDING_OPTIONS);
 
+  // Conditional AI-specific evaluation
+  const aiEvalIntroEl = document.getElementById('aiEvaluationIntroText');
+  if (aiEvalIntroEl) {
+    aiEvalIntroEl.innerHTML = AI_EVALUATION_INTRO
+      .map((text, index) => `
+        <p class="muted" style="margin-bottom:${index === AI_EVALUATION_INTRO.length - 1 ? '16px' : '10px'};">
+          ${escapeHtml(text)}
+        </p>
+      `)
+      .join('');
+  }
+  renderScale7Block(
+    'aiEvaluationWrap',
+    AI_EVALUATION_ITEMS.map(item => [item.key, item.label]),
+    'Not at all true for me',
+    'Very true for me'
+  );
 }
 
 // Shows/hides a free-text "specify" input next to a checkbox/radio group
@@ -3954,7 +3905,6 @@ function collectFieldsNow() {
   const radioNames = new Set();
   document.querySelectorAll('input[type="radio"]').forEach(r => radioNames.add(r.name));
   radioNames.forEach(name => {
-    if (name === 'familiar') return;
     const checked = document.querySelector(`input[name="${name}"]:checked`);
     if (checked) DATA.responses[name] = checked.value;
   });
@@ -4429,7 +4379,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initConsentPage();
   renderEstimatedDurationAndAlertnessNote();
 
-  // Populate the About You / SRL / CT / AI-experience radio groups and
+  // Populate the About You, SRL, CT, AI-routing, and AI-experience controls.
   renderAllSections();
 
   pageOrder = ['page-consent'];

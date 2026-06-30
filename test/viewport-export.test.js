@@ -5,7 +5,7 @@ const { CSV_COLUMNS, flattenRecord } = require('../lib/export-csv');
 
 function record() {
   return {
-    participant_id: 'P1', paper_order: ['font','food'], study_1_id: 'font', study_2_id: 'food',
+    participant_id: 'P1', paper_order: ['font'], study_1_id: 'font',
     responses: {}, timing: {
       font: {
         duration_ms: 1000,
@@ -56,10 +56,10 @@ test('official flattening preserves measured values including genuine zeros', ()
   assert.equal(row.font_region_exposed_30s_count, 6);
   assert.equal(row.font_navigation_sequence, 'P1-Top-Half>P1-Bottom-Half>P2-Top-Half>P1-Bottom-Half');
   assert.equal(row.font_backward_transition_count, 1);
-  assert.equal(row.food_duration_ms, 0);
-  assert.equal(row.food_pdf_exposure_proportion_30s, 0);
-  assert.equal(row.food_region_exposed_30s_count, 0);
-  assert.equal(row.food_backward_transition_count, 0);
+  assert.equal(row.food_duration_ms, '');
+  assert.equal(row.food_pdf_exposure_proportion_30s, '');
+  assert.equal(row.food_region_exposed_30s_count, '');
+  assert.equal(row.food_backward_transition_count, '');
 });
 
 test('unassigned paper scrolling fields remain blank', () => {
