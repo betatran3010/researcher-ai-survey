@@ -16,7 +16,7 @@ function nowTs() { return Date.now(); }
 // Single source of truth for the participant-facing estimated-duration text,
 // shown in both the intro card and the consent-form procedures paragraph.
 // Kept as a configurable value (not yet finalized): this estimate reflects
-// the current two-paper task. It MUST be reviewed and updated once the
+// the current one-paper task. It MUST be reviewed and updated once the
 // one-paper version (see PAPER_COMBOS / B1) has actually been timed.
 const OFFICIAL_ESTIMATED_DURATION = '30–45 minutes';
 
@@ -31,8 +31,12 @@ function renderEstimatedDurationAndAlertnessNote() {
     const el = document.getElementById(id);
     if (el) el.textContent = OFFICIAL_ESTIMATED_DURATION;
   });
+
   const noteEl = document.getElementById('officialAlertnessNote');
-  if (noteEl) noteEl.textContent = ALERTNESS_FOCUS_NOTE;
+  if (noteEl) {
+    noteEl.textContent = ALERTNESS_FOCUS_NOTE;
+    noteEl.style.fontWeight = '700';
+  }
 }
 
 const DATA = {
@@ -361,7 +365,7 @@ const CT_INTRO_POST = [
 const CT_SCALE_NOTE = '1 = Not at all true for me, 7 = Very true for me';
 
 // Spec section 6, "Standardized In-Task Questions For Each Assigned Study" —
-// this exact 4-question set is repeated verbatim for Paper 1 and Paper 2
+// this exact question set is used for whichever paper is assigned
 // (no per-paper custom wording), so the label lives here rather than per
 // paper as in the previous version.
 const STANDARD_Q_DEFS = [
@@ -2019,7 +2023,6 @@ function buildStudyPages() {
     }).join('');
 
     slotEl.innerHTML = `
-      <div class="section-label"><div class="section-title">Study ${i + 1} of 2</div></div>
       <div class="study-grid">
         <div class="paper-pane" id="paperPane-${paperId}">
           <div class="pdf-render-wrap" id="pdfWrap-${paperId}"><p class="pdf-status-msg">Loading paper…</p></div>
@@ -3899,13 +3902,41 @@ function finishQuiz() {
       total++;
       const name = 'quiz_' + paperId + '_' + qi;
       const chosen = document.querySelector(`input[name="${name}"]:checked`);
-      const val = chosen ? chosen.value : null;
-      DATA.responses[name] = val;
+      const displayedLetter = chosen ? chosen.value : null;
+
+      // Preserve scoring against the randomized displayed letter.
       const correctLetter = QUIZ_RUNTIME_CORRECT[name] || qObj.correct;
-      if (val === correctLetter) {
+
+      if (displayedLetter === correctLetter) {
         score++;
         paperScore++;
       }
+
+      // Convert the randomized displayed letter back to the stable original option.
+      let selectedAnswerText = null;
+
+      if (displayedLetter) {
+        const displayedIndex = ['A', 'B', 'C', 'D'].indexOf(displayedLetter);
+        const originalOptionLetter =
+          DATA.quiz_option_orders[name] &&
+          DATA.quiz_option_orders[name][displayedIndex];
+
+        const originalOptionIndex =
+          ['A', 'B', 'C', 'D'].indexOf(originalOptionLetter);
+
+        if (originalOptionIndex >= 0) {
+          selectedAnswerText = qObj.options[originalOptionIndex]
+            .replace(/^[A-D]\.\s*/, '');
+        }
+      }
+
+      // Keep the internal randomized-letter response if other code needs it.
+      DATA.responses[name] = displayedLetter;
+
+      // Save the analysis-ready stable answer content.
+      DATA.responses[
+        `quiz_${paperId}_q${qi + 1}_response`
+      ] = selectedAnswerText;
     });
     DATA.quiz_paper_scores[paperId] = paperScore;
   });
@@ -4207,8 +4238,16 @@ function finalizeSubmission() {
 async function attemptSubmission() {
   submitInFlight = true;
   const btnNext = document.getElementById('btnNext');
-  setSubmissionStatus('loading', 'Submitting your responses…');
-  if (btnNext) btnNext.disabled = true;
+
+  setSubmissionStatus(
+    'loading',
+    'Submitting your responses… Please do not close this page.'
+  );
+
+  if (btnNext) {
+    btnNext.disabled = true;
+    btnNext.textContent = 'Submitting…';
+  }
   // Submission-status fields (spec section 7) — derived straight from this
   // existing flow, not a separate tracker: 'not_attempted' is the DATA
   // default, this call moves it to 'submitting', and the try/catch below
@@ -4232,8 +4271,15 @@ async function attemptSubmission() {
     console.error('[attemptSubmission] /api/submit-survey failed:', err);
     DATA.submission_status = 'failed';
     DATA.submission_error = (err && err.message) || 'unknown_error';
-    setSubmissionStatus('error', 'Could not submit your responses. Please check your connection and retry.');
-    if (btnNext) btnNext.disabled = false;
+    setSubmissionStatus(
+      'error',
+      'We could not submit your responses. Please check your connection and try again.'
+    );
+
+    if (btnNext) {
+      btnNext.disabled = false;
+      btnNext.textContent = 'Retry submission';
+    }
   } finally {
     submitInFlight = false;
   }
@@ -4261,17 +4307,35 @@ const PROLIFIC_COMPLETION_URL = 'https://app.prolific.com/submissions/complete?c
 //   - DATA.test_mode !== true: explicit second guard so a test-mode session
 //     can never redirect even if assignment_id_source were ever misreported.
 function maybeRedirectToProlific() {
-  if (DATA.assignment_id_source !== 'prolific_id') return;
-  if (DATA.test_mode === true) return;
+  const isRealProlificParticipant =
+    DATA.assignment_id_source === 'prolific_id' &&
+    DATA.test_mode !== true;
+
+  const isTestMode = DATA.test_mode === true;
+
+  // Show the Prolific completion information for real participants and
+  // during QA testing, but not for generated non-Prolific sessions.
+  if (!isRealProlificParticipant && !isTestMode) return;
+
   const block = document.getElementById('prolificReturnBlock');
   const link = document.getElementById('prolificReturnLink');
   const codeEl = document.getElementById('prolificCompletionCode');
+  const textEl = document.getElementById('prolificReturnText');
+
   if (link) link.href = PROLIFIC_COMPLETION_URL;
   if (codeEl) codeEl.textContent = PROLIFIC_COMPLETION_CODE;
   if (block) block.style.display = '';
-  // The manual link above is always visible as a fallback (popup/navigation
-  // blockers, slow page, participant navigating back, etc.) — the automatic
-  // redirect below is a convenience on top of it, not the only path back.
+
+  // Test sessions show the code and link, but never redirect automatically.
+  if (isTestMode) {
+    if (textEl) {
+      textEl.textContent =
+        'Test mode: automatic redirection is disabled. The production completion information is shown below for verification.';
+    }
+    return;
+  }
+
+  // Real Prolific participants are redirected after confirmed submission.
   setTimeout(() => {
     window.location.href = PROLIFIC_COMPLETION_URL;
   }, 1500);

@@ -810,9 +810,14 @@ app.post('/api/submit-survey', async (req, res) => {
     if (!body || typeof body !== 'object' || !isNonEmptyString(body.participant_id)) {
       return res.status(400).json({ error: 'Invalid submission.' });
     }
+    const confirmedAt = new Date().toISOString();
+
     body.record_source = 'final_submission';
-    body.last_saved_at = new Date().toISOString();
+    body.last_saved_at = confirmedAt;
     body.completion_status = 'completed';
+    body.submission_status = 'confirmed';
+    body.submission_confirmed_at = confirmedAt;
+    body.submission_error = null;
     const serialized = JSON.stringify(body);
     if (serialized.length > MAX_SUBMISSION_BODY_LEN) {
       return res.status(400).json({ error: 'Submission too large.' });
