@@ -13,6 +13,28 @@ function genId() { return 'P-' + Date.now().toString(36) + '-' + Math.random().t
 function nowIso() { return new Date().toISOString(); }
 function nowTs() { return Date.now(); }
 
+// Single source of truth for the participant-facing estimated-duration text,
+// shown in both the intro card and the consent-form procedures paragraph.
+// Kept as a configurable value (not yet finalized): this estimate reflects
+// the current two-paper task. It MUST be reviewed and updated once the
+// one-paper version (see PAPER_COMBOS / B1) has actually been timed.
+const OFFICIAL_ESTIMATED_DURATION = '30–45 minutes';
+
+// Exact wording requested for the alertness/focus note shown alongside the
+// estimated duration on the first participant-facing page, before consent.
+const ALERTNESS_FOCUS_NOTE =
+  'This study involves sustained reading and evaluation of research materials. ' +
+  'Please begin only when you have enough uninterrupted time and feel alert and able to concentrate.';
+
+function renderEstimatedDurationAndAlertnessNote() {
+  ['officialEstimatedDurationIntro', 'officialEstimatedDurationProcedures'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = OFFICIAL_ESTIMATED_DURATION;
+  });
+  const noteEl = document.getElementById('officialAlertnessNote');
+  if (noteEl) noteEl.textContent = ALERTNESS_FOCUS_NOTE;
+}
+
 const DATA = {
   participant_id: genId(),
   session_start_iso: nowIso(),
@@ -30,8 +52,8 @@ const DATA = {
   condition: null,
   ct_scale_placement: null,
   study_order: [],
-  study_1_id: null, study_2_id: null,
-  study_1_title: null, study_2_title: null,
+  study_1_id: null,
+  study_1_title: null,
 
   // New backend randomization variables (spec-required names). Mirror the
   // legacy fields above so neither the existing export pipeline nor the new
@@ -50,9 +72,8 @@ const DATA = {
   role_locked_to_original: false,   // true if a role change on this browser was overridden to keep the original assignment stable
   paper_order_version: null,        // version tag baked into the server's paper-order hash input (e.g. "v1")
   assigned_paper_1_id: null, assigned_paper_1_title: null,
-  assigned_paper_2_id: null, assigned_paper_2_title: null,
-  unassigned_paper_id: null,
-  paper_order: [], // mirrors study_order (2 entries)
+  unassigned_paper_ids: [],
+  paper_order: [], // mirrors study_order (one entry)
 
   responses: {},
   ai_chats: { font: [], food: [], listing: [] },
@@ -334,7 +355,7 @@ const CT_INTRO_PRE = [
 
 const CT_INTRO_POST = [
   'Before finishing, we would like to ask a few general questions about how you typically evaluate research information.',
-  'The following questions ask about your general habits when evaluating research claims, evidence, and explanations. Please answer based on how you usually approach these kinds of tasks, rather than only on the studies you completed today or how you think you should respond. There are no right or wrong answers.'
+  'The following questions ask about your general habits when evaluating research claims, evidence, and explanations. Please answer based on how you usually approach these kinds of tasks, rather than only on the study you completed today or how you think you should respond. There are no right or wrong answers.'
 ];
 
 const CT_SCALE_NOTE = '1 = Not at all true for me, 7 = Very true for me';
@@ -345,28 +366,13 @@ const CT_SCALE_NOTE = '1 = Not at all true for me, 7 = Very true for me';
 // paper as in the previous version.
 const STANDARD_Q_DEFS = [
   {
-    suffix: 'strength', type: 'textgroup', label: 'List 3 strengths of this study.',
-    items: [
-      { suffix: 'strength_1', itemLabel: 'Strength 1' },
-      { suffix: 'strength_2', itemLabel: 'Strength 2' },
-      { suffix: 'strength_3', itemLabel: 'Strength 3' }
-    ]
+    suffix: 'strength', type: 'text', label: 'Identify one strength of this study.'
   },
   {
-    suffix: 'limitation', type: 'textgroup', label: 'List 3 limitations of this study.',
-    items: [
-      { suffix: 'limitation_1', itemLabel: 'Limitation 1' },
-      { suffix: 'limitation_2', itemLabel: 'Limitation 2' },
-      { suffix: 'limitation_3', itemLabel: 'Limitation 3' }
-    ]
+    suffix: 'limitation', type: 'text', label: 'Identify one limitation of this study.'
   },
   {
-    suffix: 'improvement', type: 'textgroup', label: 'List 3 areas of improvement or follow-up experiments.',
-    items: [
-      { suffix: 'improvement_1', itemLabel: 'Improvement or follow-up experiment 1' },
-      { suffix: 'improvement_2', itemLabel: 'Improvement or follow-up experiment 2' },
-      { suffix: 'improvement_3', itemLabel: 'Improvement or follow-up experiment 3' }
-    ]
+    suffix: 'improvement', type: 'text', label: 'Suggest one improvement or follow-up experiment.'
   },
   {
     suffix: 'understood', type: 'scale7', label: 'How well do you feel you understood this paper?',
@@ -560,13 +566,12 @@ function parseTestModeParams() {
   if (papersRaw != null && papersRaw !== '') {
     papers = papersRaw.split(',').map(s => s.trim()).filter(Boolean);
     const validPapers =
-      papers.length === 2 &&
-      papers[0] !== papers[1] &&
+      papers.length === 1 &&
       papers.every(p => TEST_VALID_PAPER_IDS.includes(p));
     if (!validPapers) {
       return {
         requested: true, valid: false, cell: null, papers: null,
-        error: 'Invalid ?papers= override. Must be exactly two distinct values from: ' + TEST_VALID_PAPER_IDS.join(', ')
+        error: 'Invalid ?papers= override. Must be exactly one value from: ' + TEST_VALID_PAPER_IDS.join(', ')
       };
     }
   }
@@ -586,7 +591,7 @@ function showTestModeDevError(message) {
   el.innerHTML = '<h1 style="color:#ff6b6b;">TEST MODE — Invalid configuration</h1>' +
     '<p style="font-size:16px;max-width:680px;">' + escapeHtml(message) + '</p>' +
     '<p style="opacity:.7;">Valid cells: ' + TEST_VALID_CELLS.join(', ') + '<br>' +
-    'Valid papers: ' + TEST_VALID_PAPER_IDS.join(', ') + ' (exactly two, distinct)</p>';
+    'Valid papers: ' + TEST_VALID_PAPER_IDS.join(', ') + ' (exactly one)</p>';
   document.body.appendChild(el);
 }
 
@@ -604,7 +609,7 @@ function renderTestModeBanner() {
       'padding:5px 10px;text-align:center;pointer-events:none;';
     document.body.appendChild(el);
   }
-  const papersLabel = TEST_MODE_PAPERS ? (TEST_MODE_PAPERS[0] + ' → ' + TEST_MODE_PAPERS[1]) : '(default order)';
+  const papersLabel = TEST_MODE_PAPERS ? (TEST_MODE_PAPERS[0]) : '(default order)';
   el.textContent = 'TEST MODE — ' + (TEST_MODE_CELL || '?') + ' — ' + papersLabel;
 }
 
@@ -665,10 +670,7 @@ function buildPageOrder() {
     order.push(...INSTRUCTIONS_PAGE_IDS);
   }
 
-  order.push(
-    'page-study-1',
-    'page-study-2'
-  );
+  order.push('page-study-1');
 
   if (DATA.ct_scale_placement === 'post') {
     order.push('page-ct');
@@ -858,18 +860,18 @@ async function assignConditionAndOrder(researchRole, researchRoleYears) {
   // Paper selection/order is now ALSO a deterministic server hash (separate
   // from the condition/CT hash above), keyed by the same stable id, so it
   // survives refresh/repeat requests exactly like the condition does.
-  const order = data.paper_order;
-  const unassigned = data.unassigned_paper_id;
+  const order = Array.isArray(data.paper_order) ? data.paper_order.slice(0, 1) : [];
+  const unassigned = Array.isArray(data.unassigned_paper_ids) ? data.unassigned_paper_ids : [];
+  if (order.length !== 1 || !PAPERS[order[0]]) throw new Error('Server returned an invalid one-paper assignment.');
 
   DATA.study_order = order;
-  DATA.study_1_id = order[0]; DATA.study_2_id = order[1];
+  DATA.study_1_id = order[0];
   DATA.study_1_title = PAPERS[order[0]].title;
-  DATA.study_2_title = PAPERS[order[1]].title;
 
   DATA.paper_order = [...order];
-  DATA.assigned_paper_1_id = order[0]; DATA.assigned_paper_1_title = PAPERS[order[0]].title;
-  DATA.assigned_paper_2_id = order[1]; DATA.assigned_paper_2_title = PAPERS[order[1]].title;
-  DATA.unassigned_paper_id = unassigned;
+  DATA.assigned_paper_1_id = order[0];
+  DATA.assigned_paper_1_title = PAPERS[order[0]].title;
+  DATA.unassigned_paper_ids = [...unassigned];
 
   writeAssignmentCache(stableId, {
     research_role: DATA.research_role,
@@ -884,7 +886,7 @@ async function assignConditionAndOrder(researchRole, researchRoleYears) {
     paper_order_version: DATA.paper_order_version,
     stable_assignment_id_hash: DATA.stable_assignment_id_hash,
     study_order: DATA.study_order,
-    unassigned_paper_id: DATA.unassigned_paper_id
+    unassigned_paper_ids: DATA.unassigned_paper_ids
   });
 }
 
@@ -931,18 +933,18 @@ async function assignConditionAndOrderTestMode(researchRole, researchRoleYears) 
 
   document.body.classList.add(DATA.ai_condition === 'AI' ? 'condition-ai' : 'condition-noai');
 
-  const order = data.paper_order;
-  const unassigned = data.unassigned_paper_id;
+  const order = Array.isArray(data.paper_order) ? data.paper_order.slice(0, 1) : [];
+  const unassigned = Array.isArray(data.unassigned_paper_ids) ? data.unassigned_paper_ids : [];
+  if (order.length !== 1 || !PAPERS[order[0]]) throw new Error('Server returned an invalid one-paper assignment.');
 
   DATA.study_order = order;
-  DATA.study_1_id = order[0]; DATA.study_2_id = order[1];
+  DATA.study_1_id = order[0];
   DATA.study_1_title = PAPERS[order[0]].title;
-  DATA.study_2_title = PAPERS[order[1]].title;
 
   DATA.paper_order = [...order];
-  DATA.assigned_paper_1_id = order[0]; DATA.assigned_paper_1_title = PAPERS[order[0]].title;
-  DATA.assigned_paper_2_id = order[1]; DATA.assigned_paper_2_title = PAPERS[order[1]].title;
-  DATA.unassigned_paper_id = unassigned;
+  DATA.assigned_paper_1_id = order[0];
+  DATA.assigned_paper_1_title = PAPERS[order[0]].title;
+  DATA.unassigned_paper_ids = [...unassigned];
 
   // Keep the banner's paper labels in sync even when no ?papers= override
   // was supplied (i.e. the default combo came back from the server).
@@ -1066,7 +1068,7 @@ function updateNav() {
   } else {
     if (btnNext) btnNext.style.display = '';
     const lastInstrId = INSTRUCTIONS_PAGE_IDS[INSTRUCTIONS_PAGE_IDS.length - 1];
-    if (btnNext) btnNext.textContent = (curId === 'page-debrief') ? 'Finish' : (curId === lastInstrId ? 'Begin Task →' : 'Continue →');
+    if (btnNext) btnNext.textContent = (curId === 'page-debrief') ? 'Submit responses' : (curId === lastInstrId ? 'Begin Task →' : 'Continue →');
   }
   const topMeta = document.getElementById('topMeta');
   if (topMeta) topMeta.textContent = 'ID: ' + DATA.participant_id;
@@ -1104,9 +1106,8 @@ async function navigate(dir) {
       finalizeStudyTiming(paperId);
     }
 
-    // Paper 2 is the final in-task page. Stop monitoring and leave
-    // fullscreen before advancing to the reflections section.
-    if (studyNumber === 2) {
+    // The single assigned paper is the final in-task page.
+    if (studyNumber === 1) {
       await endTaskPhaseAndExitFullscreen();
     }
   }
@@ -1133,6 +1134,8 @@ async function navigate(dir) {
     navigateInFlight = false;
     if (!ok) return;
     finalizeAboutYou();
+    markAutosaveDirty();
+    saveProgressNow();
   }
 
   advanceFromIndex(idx, dir);
@@ -1163,6 +1166,7 @@ function advanceFromIndex(idx, dir) {
   }
 
   showPage(pageOrder[currentIdx]);
+  if (dir > 0) { markAutosaveDirty(); saveProgressNow(); }
 }
 
 // Builds everything that depends on the assignment just received from the
@@ -1724,13 +1728,13 @@ function setupRoleYearsField(containerId, fieldName, options) {
 const INSTRUCTIONS_PAGES_COMMON = [
   {
     paragraphs: [
-      'You will now read two short research studies, presented one at a time.',
-      'For each study, the paper will appear on the left side of the page, and the response questions will appear on the right. After reading the study, you will identify its strengths and limitations, suggest improvements or future directions, and rate how convincing you find its conclusions.'
+      'You will now read one short research study.',
+      'The paper will appear on the left side of the page, and the response questions will appear on the right. After reading the study, you will identify its strengths and limitations, suggest improvements or future directions, and rate how convincing you find its conclusions.'
     ]
   },
   {
     paragraphs: [
-      'The studies in this task were artificially constructed. When reviewing each study, please apply the same analytical and scientific reasoning and judgment that you would use when assessing real research.'
+      'The study in this task were artificially constructed. When reviewing the study, please apply the same analytical and scientific reasoning and judgment that you would use when assessing real research.'
     ]
   },
   {
@@ -1768,7 +1772,7 @@ const INSTRUCTIONS_PAGES_AI_ONLY = [
   },
   {
     paragraphs: [
-      'You may send up to [[FIVE]] queries to the AI assistant for each study. The number of messages remaining will be displayed in the AI Assistant tab. You will receive the [[SAME]] compensation regardless of how much you use AI.'
+      'You may send up to [[FIVE]] queries to the AI assistant for the study. The number of messages remaining will be displayed in the AI Assistant tab. You will receive the [[SAME]] compensation regardless of how much you use AI.'
     ]
   }
 ];
@@ -2939,7 +2943,7 @@ async function sendAIMessage(paperId) {
   // callBackendChat). Must be captured before pushing userTurn below.
   const priorHistory = DATA.ai_chats[paperId].slice();
   const userTurn = { role: 'user', content: text, ts: nowIso() };
-  DATA.ai_chats[paperId].push(userTurn);
+  DATA.ai_chats[paperId].push(userTurn); markAutosaveDirty(); saveProgressNow();
   if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
   if (!DATA.timing[paperId].first_ai_message_ts) {
     DATA.timing[paperId].first_ai_message_ts = nowTs();
@@ -3962,7 +3966,7 @@ function flattenForExport() {
     paper_order_version: DATA.paper_order_version,
     study_order: DATA.study_order.join(','),
     paper_order: DATA.paper_order.join(','),
-    unassigned_paper_id: DATA.unassigned_paper_id,
+    unassigned_paper_ids: DATA.unassigned_paper_ids,
     quiz_score: DATA.quiz_score,
     quiz_total: DATA.quiz_total,
     fullscreen_used: DATA.fullscreen_used,
@@ -4223,6 +4227,7 @@ async function attemptSubmission() {
     // current page with their data intact and an inline retry affordance.
     currentIdx = pageOrder.indexOf('page-submitted');
     showPage('page-submitted');
+    maybeRedirectToProlific();
   } catch (err) {
     console.error('[attemptSubmission] /api/submit-survey failed:', err);
     DATA.submission_status = 'failed';
@@ -4239,12 +4244,105 @@ function retrySubmission() {
   attemptSubmission();
 }
 
-// ---------- Autosave ----------
-function autosave() {
-  collectFieldsNow();
-  try { localStorage.setItem('research_survey_autosave', JSON.stringify(DATA)); } catch (e) { }
+// ---------- Prolific redirect (official survey only — never present in the
+// pilot survey codebase) ----------
+// Finalized values for the live Prolific study. PROLIFIC_COMPLETION_URL is
+// derived from PROLIFIC_COMPLETION_CODE (not hand-duplicated) so the
+// displayed code/link and the automatic redirect can never drift apart.
+const PROLIFIC_COMPLETION_CODE = 'C1G769NX';
+const PROLIFIC_COMPLETION_URL = 'https://app.prolific.com/submissions/complete?cc=' + PROLIFIC_COMPLETION_CODE;
+
+// Called only from the success branch of attemptSubmission(), i.e. only
+// after a confirmed server-side save — never on a failed/retrying attempt.
+// Both conditions below must hold for a redirect to occur:
+//   - DATA.assignment_id_source === 'prolific_id': only participants who
+//     actually arrived with a real Prolific ID (excludes 'generated_fallback'
+//     and 'test_mode' assignment sources).
+//   - DATA.test_mode !== true: explicit second guard so a test-mode session
+//     can never redirect even if assignment_id_source were ever misreported.
+function maybeRedirectToProlific() {
+  if (DATA.assignment_id_source !== 'prolific_id') return;
+  if (DATA.test_mode === true) return;
+  const block = document.getElementById('prolificReturnBlock');
+  const link = document.getElementById('prolificReturnLink');
+  const codeEl = document.getElementById('prolificCompletionCode');
+  if (link) link.href = PROLIFIC_COMPLETION_URL;
+  if (codeEl) codeEl.textContent = PROLIFIC_COMPLETION_CODE;
+  if (block) block.style.display = '';
+  // The manual link above is always visible as a fallback (popup/navigation
+  // blockers, slow page, participant navigating back, etc.) — the automatic
+  // redirect below is a convenience on top of it, not the only path back.
+  setTimeout(() => {
+    window.location.href = PROLIFIC_COMPLETION_URL;
+  }, 1500);
 }
-setInterval(autosave, 10000);
+
+// ---------- Autosave ----------
+const AUTOSAVE_LOCAL_KEY = 'research_survey_autosave';
+let autosaveDirty = false;
+let autosaveInFlight = false;
+let autosaveQueued = false;
+let autosaveDebounceTimer = null;
+
+function autosaveAllowed() {
+  return DATA.consent === true && Boolean(DATA.assignment_cell) &&
+    DATA.submission_status !== 'submitting' && DATA.submission_status !== 'confirmed';
+}
+
+function markAutosaveDirty() {
+  if (!autosaveAllowed()) return;
+  autosaveDirty = true;
+  try { localStorage.setItem(AUTOSAVE_LOCAL_KEY, JSON.stringify(DATA)); } catch (e) { }
+}
+
+function scheduleAutosave(delayMs = 700) {
+  markAutosaveDirty();
+  clearTimeout(autosaveDebounceTimer);
+  autosaveDebounceTimer = setTimeout(() => saveProgressNow(), delayMs);
+}
+
+async function saveProgressNow({ useBeacon = false } = {}) {
+  if (!autosaveAllowed() || !autosaveDirty) return;
+  collectFieldsNow();
+  if (autosaveInFlight) { autosaveQueued = true; return; }
+  autosaveInFlight = true;
+  autosaveDirty = false;
+  const payload = JSON.stringify(DATA);
+  try {
+    if (useBeacon && navigator.sendBeacon) {
+      const accepted = navigator.sendBeacon('/api/save-progress', new Blob([payload], { type: 'application/json' }));
+      if (!accepted) autosaveDirty = true;
+    } else {
+      const response = await fetch('/api/save-progress', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true
+      });
+      if (!response.ok) autosaveDirty = true;
+    }
+  } catch (e) {
+    autosaveDirty = true; // silent to participants
+  } finally {
+    autosaveInFlight = false;
+    if (autosaveQueued || autosaveDirty) {
+      autosaveQueued = false;
+      setTimeout(() => saveProgressNow(), 0);
+    }
+  }
+}
+
+function installAutosaveTriggers() {
+  document.addEventListener('input', (event) => {
+    if (event.target.matches('textarea, input[type="text"], input[type="number"]')) markAutosaveDirty();
+  }, true);
+  document.addEventListener('focusout', (event) => {
+    if (event.target.matches('textarea, input[type="text"], input[type="number"]')) saveProgressNow();
+  }, true);
+  document.addEventListener('change', (event) => {
+    if (event.target.matches('input[type="radio"], input[type="checkbox"], input[type="range"], select')) scheduleAutosave();
+  }, true);
+  window.addEventListener('pagehide', () => saveProgressNow({ useBeacon: true }));
+}
+
+setInterval(() => { if (autosaveDirty) saveProgressNow(); }, 30000);
 
 // ---------- Init ----------
 document.addEventListener('DOMContentLoaded', async () => {
@@ -4263,7 +4361,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     throw e;
   }
 
+  installAutosaveTriggers();
   initConsentPage();
+  renderEstimatedDurationAndAlertnessNote();
 
   // Populate the About You / SRL / CT / AI-experience radio groups and
   renderAllSections();

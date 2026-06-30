@@ -380,25 +380,21 @@ const ASSIGNMENT_CELLS = [
   { ai_condition: 'noAI', ct_placement: 'post', cell: 'noAI_post' }
 ];
 
-// The 3-paper pool, and every way to pick an ordered pair of 2 from it
-// (3 choices of which paper to drop x 2 orderings of the remaining two = 6).
-// Kept in sync with PAPER_IDS / PAPERS in researcher_ai_survey.js.
-const PAPER_COMBOS = [
-  { order: ['font', 'food'], unassigned: 'listing' },
-  { order: ['food', 'font'], unassigned: 'listing' },
-  { order: ['font', 'listing'], unassigned: 'food' },
-  { order: ['listing', 'font'], unassigned: 'food' },
-  { order: ['food', 'listing'], unassigned: 'font' },
-  { order: ['listing', 'food'], unassigned: 'font' }
+// The 3-paper pool. Each participant is assigned exactly ONE paper; the
+// other two are recorded as unassigned_paper_ids. Kept in sync with
+// PAPER_IDS / PAPERS in researcher_ai_survey.js.
+const PAPER_ASSIGNMENTS = [
+  { paper_id: 'font', unassigned_paper_ids: ['food', 'listing'] },
+  { paper_id: 'food', unassigned_paper_ids: ['font', 'listing'] },
+  { paper_id: 'listing', unassigned_paper_ids: ['font', 'food'] }
 ];
 
-// Bumped from v1 (the old deterministic-hash scheme) to v2 because the
-// METHOD changed (hash-modulo -> exact Firestore-balanced counters) — not
-// because the cells/combos themselves changed. Per the existing
-// versioning convention, this is just a record of which logic produced a
-// given assignment; it does not by itself reassign anyone.
-const ASSIGNMENT_VERSION = 'v2_firestore_balanced';
-const PAPER_ORDER_VERSION = 'v2_firestore_balanced';
+// Bumped to v3 because the assignment structure changed from two ordered
+// papers per participant (v2) to exactly one paper per participant (v3).
+// Per the existing versioning convention, this is just a record of which
+// logic produced a given assignment; it does not by itself reassign anyone.
+const ASSIGNMENT_VERSION = 'v3_firestore_balanced_one_paper';
+const PAPER_ORDER_VERSION = 'v3_firestore_balanced_one_paper';
 const ASSIGNMENT_SOURCE = 'firestore_balanced_transaction';
 
 // Canonical normalization for whatever identifier is being hashed (Prolific
@@ -479,19 +475,19 @@ app.post('/api/assign-condition', async (req, res) => {
 
       const counterData = counterSnap.exists ? counterSnap.data() : null;
       const cellCounts = ASSIGNMENT_CELLS.map(c => (counterData && counterData.cell_counts && counterData.cell_counts[c.cell]) || 0);
-      const comboCounts = PAPER_COMBOS.map((c, i) => (counterData && counterData.paper_combo_counts && counterData.paper_combo_counts['combo_' + i]) || 0);
+      const paperCounts = PAPER_ASSIGNMENTS.map((p, i) => (counterData && counterData.paper_counts && counterData.paper_counts['paper_' + i]) || 0);
 
       // The two balancing tasks are independent of each other, per spec:
       // pick the least-filled cell, and SEPARATELY pick the least-filled
-      // paper combo, within this stratum.
+      // paper identity, within this stratum.
       const chosenCell = ASSIGNMENT_CELLS[pickLeastFilledIndex(cellCounts)];
-      const chosenComboIdx = pickLeastFilledIndex(comboCounts);
-      const chosenCombo = PAPER_COMBOS[chosenComboIdx];
+      const chosenPaperIdx = pickLeastFilledIndex(paperCounts);
+      const chosenPaper = PAPER_ASSIGNMENTS[chosenPaperIdx];
 
       const newCellCounts = Object.assign({}, counterData && counterData.cell_counts);
       newCellCounts[chosenCell.cell] = (newCellCounts[chosenCell.cell] || 0) + 1;
-      const newComboCounts = Object.assign({}, counterData && counterData.paper_combo_counts);
-      newComboCounts['combo_' + chosenComboIdx] = (newComboCounts['combo_' + chosenComboIdx] || 0) + 1;
+      const newPaperCounts = Object.assign({}, counterData && counterData.paper_counts);
+      newPaperCounts['paper_' + chosenPaperIdx] = (newPaperCounts['paper_' + chosenPaperIdx] || 0) + 1;
 
       const assignedAt = new Date().toISOString();
       const assignmentDoc = {
@@ -502,9 +498,9 @@ app.post('/api/assign-condition', async (req, res) => {
         ai_condition: chosenCell.ai_condition,
         critical_thinking_placement: chosenCell.ct_placement,
         assignment_cell: chosenCell.cell,
-        paper_ids: chosenCombo.order,
-        paper_order: chosenCombo.order,
-        unassigned_paper_id: chosenCombo.unassigned,
+        paper_ids: [chosenPaper.paper_id],
+        paper_order: [chosenPaper.paper_id],
+        unassigned_paper_ids: chosenPaper.unassigned_paper_ids,
         assigned_at: assignedAt,
         assignment_source: ASSIGNMENT_SOURCE,
         assignment_version: ASSIGNMENT_VERSION,
@@ -520,7 +516,7 @@ app.post('/api/assign-condition', async (req, res) => {
       t.set(counterRef, {
         stratum: expertise_stratum,
         cell_counts: newCellCounts,
-        paper_combo_counts: newComboCounts,
+        paper_counts: newPaperCounts,
         updated_at: assignedAt
       }, { merge: true });
       t.set(assignmentRef, assignmentDoc);
@@ -541,7 +537,7 @@ app.post('/api/assign-condition', async (req, res) => {
       assignment_version: assignment.assignment_version,
       paper_order_version: assignment.paper_order_version,
       paper_order: assignment.paper_order,
-      unassigned_paper_id: assignment.unassigned_paper_id
+      unassigned_paper_ids: assignment.unassigned_paper_ids
     });
   } catch (err) {
     console.error('[api/assign-condition] Unexpected error', err);
@@ -552,10 +548,10 @@ app.post('/api/assign-condition', async (req, res) => {
 // ===================== TEST MODE (DEV/QA ONLY) =====================
 // Whitelists for the test-mode override params. Deliberately re-derived from
 // the same authoritative arrays used by real assignment (ASSIGNMENT_CELLS,
-// PAPER_COMBOS) rather than hand-duplicated, so the two can never drift out
-// of sync with each other.
+// PAPER_ASSIGNMENTS) rather than hand-duplicated, so the two can never drift
+// out of sync with each other.
 const TEST_VALID_CELLS = ASSIGNMENT_CELLS.map(c => c.cell); // ['AI_pre','AI_post','noAI_pre','noAI_post']
-const TEST_VALID_PAPER_IDS = Array.from(new Set(PAPER_COMBOS.flatMap(c => c.order))); // ['font','food','listing']
+const TEST_VALID_PAPER_IDS = PAPER_ASSIGNMENTS.map(p => p.paper_id); // ['font','food','listing']
 
 // Exposes ONLY a boolean. Never exposes the value of any other env var or
 // secret — this is the sole piece of server state the frontend is allowed to
@@ -564,16 +560,18 @@ app.get('/api/test-mode-status', (req, res) => {
   res.json({ enabled: ENABLE_TEST_MODE });
 });
 
-// TEST-ONLY assignment endpoint. Computes a forced cell + paper order
-// in-memory and returns it in the same shape as /api/assign-condition, but:
+// TEST-ONLY assignment endpoint. Computes a forced cell + single paper
+// assignment in-memory and returns it in the same shape as
+// /api/assign-condition, but:
 //   - never reads or writes ASSIGNMENT_COUNTERS_COLLECTION (no balancing
 //     counters are touched, so test runs cannot skew real study balance);
 //   - never reads or writes ASSIGNMENTS_COLLECTION (no permanent Firestore
 //     assignment record is created for a test run);
 //   - only accepts `cell` from TEST_VALID_CELLS and `papers` (optional) as
-//     exactly two distinct values from TEST_VALID_PAPER_IDS — any other
-//     input is rejected with a clear 400 error rather than silently falling
-//     back to a default/unintended condition.
+//     EXACTLY ONE value from TEST_VALID_PAPER_IDS — a comma-separated or
+//     multi-paper override (the old two-paper shape) is rejected with a
+//     clear 400 error rather than silently falling back to a default/
+//     unintended condition.
 app.post('/api/test-assign-condition', (req, res) => {
   if (!ENABLE_TEST_MODE) {
     return res.status(403).json({ error: 'Test mode is disabled on this server (ENABLE_TEST_MODE is not "true").' });
@@ -585,24 +583,30 @@ app.post('/api/test-assign-condition', (req, res) => {
     return res.status(400).json({ error: 'Invalid or missing test cell. Must be exactly one of: ' + TEST_VALID_CELLS.join(', ') });
   }
 
-  let order, unassigned;
+  let paperId, unassignedPaperIds;
   const papersOverride = req.body && req.body.papers;
   if (papersOverride !== undefined && papersOverride !== null) {
+    // Exactly one valid paper id, either as a bare string or a one-element
+    // array. A two-(or more-)paper override — including the old
+    // comma-separated two-paper shape — is rejected outright; this is a
+    // one-paper survey now, so there is no valid multi-paper override.
+    const candidate = Array.isArray(papersOverride)
+      ? (papersOverride.length === 1 ? papersOverride[0] : null)
+      : papersOverride;
     const valid =
-      Array.isArray(papersOverride) &&
-      papersOverride.length === 2 &&
-      papersOverride[0] !== papersOverride[1] &&
-      papersOverride.every(p => TEST_VALID_PAPER_IDS.includes(p));
+      Array.isArray(papersOverride)
+        ? (papersOverride.length === 1 && TEST_VALID_PAPER_IDS.includes(candidate))
+        : (typeof papersOverride === 'string' && !papersOverride.includes(',') && TEST_VALID_PAPER_IDS.includes(candidate));
     if (!valid) {
-      return res.status(400).json({ error: 'Invalid test papers override. Must be exactly two distinct values from: ' + TEST_VALID_PAPER_IDS.join(', ') });
+      return res.status(400).json({ error: 'Invalid test papers override. Must be exactly one value from: ' + TEST_VALID_PAPER_IDS.join(', ') + ' (multi-paper overrides are no longer supported).' });
     }
-    order = [papersOverride[0], papersOverride[1]];
-    unassigned = TEST_VALID_PAPER_IDS.find(p => !order.includes(p));
+    paperId = candidate;
+    unassignedPaperIds = TEST_VALID_PAPER_IDS.filter(p => p !== paperId);
   } else {
-    // No override supplied: a fixed, reproducible default pair (no
+    // No override supplied: a fixed, reproducible default paper (no
     // randomness, no Firestore lookup involved).
-    order = PAPER_COMBOS[0].order;
-    unassigned = PAPER_COMBOS[0].unassigned;
+    paperId = PAPER_ASSIGNMENTS[0].paper_id;
+    unassignedPaperIds = PAPER_ASSIGNMENTS[0].unassigned_paper_ids;
   }
 
   const research_role = (req.body && typeof req.body.research_role === 'string') ? req.body.research_role : null;
@@ -638,8 +642,8 @@ app.post('/api/test-assign-condition', (req, res) => {
     assignment_source: 'test_mode_override',
     assignment_version: ASSIGNMENT_VERSION,
     paper_order_version: PAPER_ORDER_VERSION,
-    paper_order: order,
-    unassigned_paper_id: unassigned
+    paper_order: [paperId],
+    unassigned_paper_ids: unassignedPaperIds
   });
 });
 
@@ -667,6 +671,10 @@ const DATA_DIR = process.env.SUBMISSION_DATA_DIR
   ? path.resolve(process.env.SUBMISSION_DATA_DIR)
   : path.join(__dirname, 'data');
 const SUBMISSIONS_FILE = path.join(DATA_DIR, 'submissions.jsonl');
+const AUTOSAVES_FILE = path.join(DATA_DIR, 'autosaves.jsonl');
+const TEST_AUTOSAVES_FILE = path.join(DATA_DIR, 'test-autosaves.jsonl');
+const PROGRESS_COLLECTION = 'survey_progress';
+const TEST_PROGRESS_COLLECTION = 'survey_progress_test';
 const MAX_SUBMISSION_BODY_LEN = 5_000_000; // ~5MB, generous for a full participant record incl. AI transcripts
 
 function ensureDataDir() {
@@ -694,7 +702,7 @@ function todayDateStringUTC() {
 // than re-throwing, since the participant's data is in fact already durably
 // stored.
 async function saveSubmissionToGcs(body, hashedId) {
-  const objectPath = `submissions/${todayDateStringUTC()}/${hashedId}.json`;
+  const objectPath = `submissions/${hashedId}.json`;
   const file = storage.bucket(GCS_SUBMISSIONS_BUCKET).file(objectPath);
   try {
     await file.save(Buffer.from(JSON.stringify(body), 'utf8'), {
@@ -763,12 +771,48 @@ async function saveTestSubmissionToGcs(body) {
   return { objectPath };
 }
 
+
+function withProgressMetadata(body) {
+  return Object.assign({}, body, {
+    record_source: 'autosave',
+    last_saved_at: new Date().toISOString(),
+    completion_status: body.completion_status === 'completed' ? 'in_progress' : (body.completion_status || 'in_progress')
+  });
+}
+
+app.post('/api/save-progress', async (req, res) => {
+  try {
+    const body = req.body;
+    if (!body || typeof body !== 'object' || !isNonEmptyString(body.participant_id) || body.consent !== true || !body.assignment_cell) {
+      return res.status(400).json({ error: 'Invalid progress record.' });
+    }
+    if (body.submission_status === 'submitting' || body.submission_status === 'confirmed') return res.json({ ok: true, skipped: true });
+    const record = withProgressMetadata(body);
+    if (JSON.stringify(record).length > MAX_SUBMISSION_BODY_LEN) return res.status(400).json({ error: 'Progress record too large.' });
+    if (record.test_mode === true && !ENABLE_TEST_MODE) return res.status(403).json({ error: 'Test mode is disabled.' });
+    if (USE_LOCAL_SUBMISSION_FILE) {
+      ensureDataDir();
+      fs.appendFileSync(record.test_mode === true ? TEST_AUTOSAVES_FILE : AUTOSAVES_FILE, JSON.stringify(record) + '\n', 'utf8');
+    } else {
+      const collection = record.test_mode === true ? TEST_PROGRESS_COLLECTION : PROGRESS_COLLECTION;
+      await getFirestore().collection(collection).doc(record.participant_id).set(record, { merge: false });
+    }
+    return res.json({ ok: true, last_saved_at: record.last_saved_at });
+  } catch (err) {
+    console.error('[api/save-progress] Unexpected error', err);
+    return res.status(500).json({ error: 'Could not save progress.' });
+  }
+});
+
 app.post('/api/submit-survey', async (req, res) => {
   try {
     const body = req.body;
     if (!body || typeof body !== 'object' || !isNonEmptyString(body.participant_id)) {
       return res.status(400).json({ error: 'Invalid submission.' });
     }
+    body.record_source = 'final_submission';
+    body.last_saved_at = new Date().toISOString();
+    body.completion_status = 'completed';
     const serialized = JSON.stringify(body);
     if (serialized.length > MAX_SUBMISSION_BODY_LEN) {
       return res.status(400).json({ error: 'Submission too large.' });
@@ -876,8 +920,8 @@ function requireAdminExportKey(req, res, next) {
 }
 
 const ADMIN_EXPORT_TYPES = {
-  production: { local: SUBMISSIONS_FILE, gcsPrefix: 'submissions/' },
-  test: { local: TEST_SUBMISSIONS_FILE, gcsPrefix: 'test-submissions/' }
+  production: { local: SUBMISSIONS_FILE, autosaveLocal: AUTOSAVES_FILE, gcsPrefix: 'submissions/', progressCollection: PROGRESS_COLLECTION },
+  test: { local: TEST_SUBMISSIONS_FILE, autosaveLocal: TEST_AUTOSAVES_FILE, gcsPrefix: 'test-submissions/', progressCollection: TEST_PROGRESS_COLLECTION }
 };
 
 function parseAdminExportType(req) {
@@ -890,41 +934,57 @@ function parseAdminExportType(req) {
 // under the type's prefix (across all date subfolders) and downloads+parses
 // each one. A single unparsable line/object is logged and skipped rather
 // than failing the whole export.
+function parseJsonlFile(filePath, typeLabel) {
+  let raw = '';
+  try { raw = fs.readFileSync(filePath, 'utf8'); } catch (e) { return []; }
+  const records = [];
+  raw.split('\n').forEach((line) => {
+    if (!line.trim()) return;
+    try { records.push(JSON.parse(line)); }
+    catch (e) { console.error('[admin-export] Skipping unparsable local record line for', typeLabel); }
+  });
+  return records;
+}
+
+function latestRecordTime(record) {
+  const value = record.last_saved_at || record.submission_confirmed_at || record.final_submission_timestamp || record.session_end_iso || record.session_start_iso;
+  const ms = Date.parse(value || '');
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function mergeParticipantRecords(finals, autosaves) {
+  const merged = new Map();
+  for (const record of autosaves) {
+    if (!record || !record.participant_id) continue;
+    const current = merged.get(record.participant_id);
+    if (!current || latestRecordTime(record) >= latestRecordTime(current)) merged.set(record.participant_id, Object.assign({}, record, { record_source: 'autosave' }));
+  }
+  for (const record of finals) {
+    if (!record || !record.participant_id) continue;
+    merged.set(record.participant_id, Object.assign({}, record, { record_source: 'final_submission' }));
+  }
+  return Array.from(merged.values());
+}
+
 async function loadAllSubmissionRecords(type) {
   const cfg = ADMIN_EXPORT_TYPES[type];
-  const records = [];
+  const finals = [];
+  const autosaves = [];
   if (USE_LOCAL_SUBMISSION_FILE) {
-    let raw = '';
-    try {
-      raw = fs.readFileSync(cfg.local, 'utf8');
-    } catch (e) {
-      raw = ''; // file doesn't exist yet = zero submissions of this type
-    }
-    raw.split('\n').forEach((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      try {
-        records.push(JSON.parse(trimmed));
-      } catch (e) {
-        console.error('[admin-export] Skipping unparsable local record line for type', type);
-      }
-    });
+    finals.push(...parseJsonlFile(cfg.local, type + ' final'));
+    autosaves.push(...parseJsonlFile(cfg.autosaveLocal, type + ' autosave'));
   } else {
-    if (!GCS_SUBMISSIONS_BUCKET) {
-      throw new Error('GCS_SUBMISSIONS_BUCKET is not configured.');
-    }
+    if (!GCS_SUBMISSIONS_BUCKET) throw new Error('GCS_SUBMISSIONS_BUCKET is not configured.');
     const [files] = await storage.bucket(GCS_SUBMISSIONS_BUCKET).getFiles({ prefix: cfg.gcsPrefix });
     for (const file of files) {
-      if (file.name.endsWith('/')) continue; // skip folder placeholder objects
-      try {
-        const [contents] = await file.download();
-        records.push(JSON.parse(contents.toString('utf8')));
-      } catch (e) {
-        console.error('[admin-export] Skipping unreadable GCS object', file.name, e && e.message);
-      }
+      if (file.name.endsWith('/')) continue;
+      try { const [contents] = await file.download(); finals.push(JSON.parse(contents.toString('utf8'))); }
+      catch (e) { console.error('[admin-export] Skipping unreadable GCS object', file.name); }
     }
+    const snapshot = await getFirestore().collection(cfg.progressCollection).get();
+    snapshot.forEach((doc) => autosaves.push(doc.data()));
   }
-  return records;
+  return mergeParticipantRecords(finals, autosaves);
 }
 
 // The canonical, researcher-friendly CSV schema (flattened responses,

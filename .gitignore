@@ -30,3 +30,7 @@ test-submissions.json
 DATA_EXPORT.md
 "DEPLOYMENT.md
 researcher-ai-survey-main/
+
+# Pilot survey is its own standalone project/repo (separate storage, separate
+# deploy) — intentionally not part of this repo's history.
+/pilot-survey/
