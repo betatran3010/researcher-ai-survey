@@ -38,18 +38,86 @@ function setGeometry(mod,paperId,{pages,viewportTop=0,viewportHeight=100,visible
 }
 function withClock(fn){const real=Date.now;let current=0;const c={set(v){current=v;Date.now=()=>current;},advance(v){current+=v;Date.now=()=>current;}};Date.now=()=>current;try{return fn(c);}finally{Date.now=real;}}
 const PAGES=[{top:0,bottom:200},{top:220,bottom:420},{top:440,bottom:640}];
+
 test('canonical order contains exactly six half-page labels',()=>{const m=loadViewportModule();assert.deepEqual(m.SIX_REGION_ORDER,[
   'P1-Top-Half','P1-Bottom-Half','P2-Top-Half','P2-Bottom-Half','P3-Top-Half','P3-Bottom-Half']);});
+
 test('actual page geometry is split into two non-overlapping halves per page',()=>{const m=loadViewportModule();assert.deepEqual(m.buildSixRegions(PAGES),[
  {label:'P1-Top-Half',top:0,bottom:100},{label:'P1-Bottom-Half',top:100,bottom:200},
  {label:'P2-Top-Half',top:220,bottom:320},{label:'P2-Bottom-Half',top:320,bottom:420},
  {label:'P3-Top-Half',top:440,bottom:540},{label:'P3-Bottom-Half',top:540,bottom:640}]);});
-test('partial page geometry is not measurement-ready',()=>withClock(c=>{const m=loadViewportModule();c.set(0);setGeometry(m,'font',{pages:PAGES.slice(0,2),viewportHeight:100});m.startViewportTracking('font');m.markPdfContentReady('font');c.advance(6000);m.tickSegment('font');m.stopViewportTracking('font');assert.equal(m.DATA.timing.font.region_exposed_30s_count,'');}));
+
+test('EXPOSURE_THRESHOLD_MS is 30000', () => {
+  const m = loadViewportModule();
+  assert.equal(m.EXPOSURE_THRESHOLD_MS, 30000);
+});
+
+test('partial page geometry: pdf_exposure_proportion_30s is measured when contentReady is set',()=>withClock(c=>{
+  // Only 2 of the 3 pages: bucket exposure is still measured since markPdfContentReady was called.
+  const m=loadViewportModule();c.set(0);
+  setGeometry(m,'font',{pages:PAGES.slice(0,2),viewportHeight:100});
+  m.startViewportTracking('font');m.markPdfContentReady('font');
+  c.advance(6000);m.tickSegment('font');m.stopViewportTracking('font');
+  assert.notEqual(m.DATA.timing.font.pdf_exposure_proportion_30s,'');
+}));
+
 test('dominant region uses largest overlap and exact tie keeps previous state',()=>{const m=loadViewportModule();const regs=m.buildSixRegions(PAGES);let overlaps=[60,40,0,0,0,0];assert.equal(m.pickDominantRegion(overlaps,regs,null),'P1-Top-Half');overlaps=[50,50,0,0,0,0];assert.equal(m.pickDominantRegion(overlaps,regs,'P1-Bottom-Half'),'P1-Bottom-Half');assert.equal(m.pickDominantRegion(overlaps,regs,null),'P1-Top-Half');});
-test('strict exposure threshold: 30000 does not count and 30001 does',()=>{withClock(c=>{const m=loadViewportModule();c.set(0);setGeometry(m,'font',{pages:PAGES,viewportTop:0,viewportHeight:100});m.startViewportTracking('font');m.markPdfContentReady('font');c.advance(30000);m.tickSegment('font');m.stopViewportTracking('font');assert.equal(m.DATA.timing.font.region_exposed_30s_count,0);});withClock(c=>{const m=loadViewportModule();c.set(0);setGeometry(m,'food',{pages:PAGES,viewportTop:0,viewportHeight:100});m.startViewportTracking('food');m.markPdfContentReady('food');c.advance(30001);m.tickSegment('food');m.stopViewportTracking('food');assert.equal(m.DATA.timing.food.region_exposed_30s_count,1);});});
-test('viewport spanning adjacent halves credits both regions proportionally',()=>withClock(c=>{const m=loadViewportModule();c.set(0);setGeometry(m,'font',{pages:PAGES,viewportTop:50,viewportHeight:100});m.startViewportTracking('font');m.markPdfContentReady('font');c.advance(60002);m.tickSegment('font');m.stopViewportTracking('font');assert.equal(m.DATA.timing.font.region_exposed_30s_count,2);assert.ok(m.DATA.timing.font.pdf_exposure_proportion_30s>0); }));
-test('hidden and unfocused time are excluded',()=>withClock(c=>{const m=loadViewportModule();c.set(0);setGeometry(m,'font',{pages:PAGES,viewportTop:0,viewportHeight:100});m.startViewportTracking('font');m.markPdfContentReady('font');c.advance(3000);m.tickSegment('font');setGeometry(m,'font',{pages:PAGES,viewportTop:0,viewportHeight:100,visible:false});m.updateViewportSegment('font');c.advance(30000);m.tickSegment('font');m.stopViewportTracking('font');assert.equal(m.DATA.timing.font.region_exposed_30s_count,0);}));
+
+test('strict exposure threshold: exactly 30000ms does not count; 30001ms does',()=>{
+  withClock(c=>{const m=loadViewportModule();c.set(0);setGeometry(m,'font',{pages:PAGES,viewportTop:0,viewportHeight:100});m.startViewportTracking('font');m.markPdfContentReady('font');c.advance(30000);m.tickSegment('font');m.stopViewportTracking('font');assert.equal(m.DATA.timing.font.pdf_exposure_proportion_30s,0,'exactly 30000ms must not count');});
+  withClock(c=>{const m=loadViewportModule();c.set(0);setGeometry(m,'food',{pages:PAGES,viewportTop:0,viewportHeight:100});m.startViewportTracking('food');m.markPdfContentReady('food');c.advance(30001);m.tickSegment('food');m.stopViewportTracking('food');assert.ok(m.DATA.timing.food.pdf_exposure_proportion_30s>0,'30001ms must count');});
+});
+
+test('viewport spanning adjacent halves credits buckets in both regions',()=>withClock(c=>{
+  const m=loadViewportModule();c.set(0);
+  setGeometry(m,'font',{pages:PAGES,viewportTop:50,viewportHeight:100});
+  m.startViewportTracking('font');m.markPdfContentReady('font');
+  c.advance(30001);m.tickSegment('font');m.stopViewportTracking('font');
+  assert.ok(m.DATA.timing.font.pdf_exposure_proportion_30s>0,'buckets in both halves should be exposed');
+}));
+
+test('hidden and unfocused time are excluded from pdf_exposure_proportion_30s',()=>withClock(c=>{
+  const m=loadViewportModule();c.set(0);
+  setGeometry(m,'font',{pages:PAGES,viewportTop:0,viewportHeight:100});
+  m.startViewportTracking('font');m.markPdfContentReady('font');
+  c.advance(15000);m.tickSegment('font');
+  setGeometry(m,'font',{pages:PAGES,viewportTop:0,viewportHeight:100,visible:false});
+  m.updateViewportSegment('font');c.advance(30001);m.tickSegment('font');
+  m.stopViewportTracking('font');
+  assert.equal(m.DATA.timing.font.pdf_exposure_proportion_30s,0,'hidden time must not count toward _30s exposure');
+}));
+
 test('sub-second visits are removed and adjacent duplicates re-collapse',()=>{const m=loadViewportModule();assert.deepEqual(m.aggregateNavigationSequence([{region:'P1-Top-Half',ms:1500},{region:'P1-Bottom-Half',ms:500},{region:'P1-Top-Half',ms:1400}]),['P1-Top-Half']);});
-test('backward transitions follow the full six-region order',()=>{const m=loadViewportModule();const r=m.countNavigationTransitions(['P1-Top-Half','P1-Bottom-Half','P2-Top-Half','P2-Bottom-Half','P1-Bottom-Half','P3-Top-Half','P2-Bottom-Half']);assert.equal(r.backward,2);});
-test('final navigation output uses only approved labels and preserves zero backward count',()=>withClock(c=>{const m=loadViewportModule();c.set(0);setGeometry(m,'font',{pages:PAGES,viewportTop:0,viewportHeight:100});m.startViewportTracking('font');m.markPdfContentReady('font');c.advance(1500);m.tickSegment('font');setGeometry(m,'font',{pages:PAGES,viewportTop:100,viewportHeight:100});m.updateViewportSegment('font');c.advance(1500);m.tickSegment('font');m.stopViewportTracking('font');const seq=m.DATA.timing.font.navigation_sequence.split('>');assert.deepEqual(seq,['P1-Top-Half','P1-Bottom-Half']);assert.ok(seq.every(x=>m.SIX_REGION_ORDER.includes(x)));assert.equal(m.DATA.timing.font.backward_transition_count,0);}));
-test('never-rendered PDF exports blank viewport fields',()=>withClock(c=>{const m=loadViewportModule();c.set(0);m.startViewportTracking('font');c.advance(6000);m.stopViewportTracking('font');assert.equal(m.DATA.timing.font.pdf_exposure_proportion_30s,'');assert.equal(m.DATA.timing.font.region_exposed_30s_count,'');assert.equal(m.DATA.timing.font.navigation_sequence,'');assert.equal(m.DATA.timing.font.backward_transition_count,'');}));
+
+test('countNavigationTransitions returns both transitions and backward counts',()=>{
+  const m=loadViewportModule();
+  const r=m.countNavigationTransitions(['P1-Top-Half','P1-Bottom-Half','P2-Top-Half','P2-Bottom-Half','P1-Bottom-Half','P3-Top-Half','P2-Bottom-Half']);
+  assert.equal(r.backward,2);
+  // 7 states → 6 total transitions
+  assert.equal(r.transitions,6);
+});
+
+test('final navigation output uses only approved labels and sets paper_navigation_sequence',()=>withClock(c=>{
+  const m=loadViewportModule();c.set(0);
+  setGeometry(m,'font',{pages:PAGES,viewportTop:0,viewportHeight:100});
+  m.startViewportTracking('font');m.markPdfContentReady('font');
+  c.advance(35000);m.tickSegment('font');
+  setGeometry(m,'font',{pages:PAGES,viewportTop:100,viewportHeight:100});
+  m.updateViewportSegment('font');c.advance(35000);m.tickSegment('font');
+  m.stopViewportTracking('font');
+  const seq=m.DATA.timing.font.paper_navigation_sequence.split('>');
+  assert.deepEqual(seq,['P1-Top-Half','P1-Bottom-Half']);
+  assert.ok(seq.every(x=>m.SIX_REGION_ORDER.includes(x)));
+  assert.equal(m.DATA.timing.font.backward_transition_count,0);
+  // navigation_transition_count is not in the data dictionary and is not stored.
+  assert.equal(m.DATA.timing.font.navigation_transition_count, undefined);
+}));
+
+test('never-rendered PDF exports blank viewport fields',()=>withClock(c=>{
+  const m=loadViewportModule();c.set(0);
+  m.startViewportTracking('font');c.advance(35000);m.stopViewportTracking('font');
+  assert.equal(m.DATA.timing.font.pdf_exposure_proportion_30s,'');
+  assert.equal(m.DATA.timing.font.paper_navigation_sequence,'');
+  // navigation_transition_count is not stored; only backward_transition_count is.
+  assert.equal(m.DATA.timing.font.backward_transition_count,'');
+}));

@@ -2,17 +2,17 @@
 // (local-file storage mode, test mode enabled, throwaway admin key, no GCP
 // credentials) and exercises ONLY the test-mode assignment endpoints
 // (/api/test-mode-status, /api/test-assign-condition) over HTTP on
-// localhost. These are the one endpoints that can be exercised without a
+// localhost. These are the endpoints that can be exercised without a
 // real Firestore project, because /api/test-assign-condition deliberately
-// never touches ASSIGNMENT_COUNTERS_COLLECTION or ASSIGNMENTS_COLLECTION.
+// never touches ASSIGNMENTS_COLLECTION.
 //
-// /api/assign-condition (the real, Firestore-transaction-backed balancing
+// /api/assign-condition (the real, Firestore-transaction-backed uniform-random
 // endpoint) is NOT exercised here, for the same reason
 // test/admin-endpoints.test.js never calls Firestore/GCS-dependent routes:
 // this environment has no GCP credentials or Firestore emulator available.
-// Verifying the real per-stratum least-filled balancing across all 3 papers
-// and the 4 AI x CT cells, and the idempotent re-assignment behavior,
-// remains a manual/emulator-backed test (see final report).
+// Verifying the real uniform-random draw across all 3 papers and the 4
+// AI x CT cells, and the idempotent re-assignment behavior, remains a
+// manual/emulator-backed test (see final report).
 //
 // Run with: npm run test:export (invoked together with export.test.js,
 // admin-endpoints.test.js, viewport.test.js)
@@ -105,8 +105,8 @@ test('valid single-paper override returns exactly one assigned paper and two una
   assert.equal(body.paper_order.length, 1);
   assert.deepEqual(body.unassigned_paper_ids.slice().sort(), ['font', 'listing']);
   assert.equal(body.unassigned_paper_ids.length, 2);
-  assert.equal(body.assignment_version, 'v3_firestore_balanced_one_paper');
-  assert.equal(body.paper_order_version, 'v3_firestore_balanced_one_paper');
+  assert.equal(body.assignment_version, 'v4_uniform_random_one_paper');
+  assert.equal(body.paper_order_version, 'v4_uniform_random_one_paper');
   assert.equal(body.assignment_cell, 'AI_pre');
   assert.equal(body.assignment_source, 'test_mode_override');
 });

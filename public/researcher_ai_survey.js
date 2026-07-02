@@ -96,6 +96,12 @@ const DATA = {
   //   - quiz answers                              -> responses['quiz_<paperId>_<qi>']
   //   - quiz summary                               -> quiz_score / quiz_total (below)
   violations: [],
+  // component_log: per-paper sequence of active-component states for
+  // computing component_navigation_sequence and component_transition_count.
+  // Each entry is a string: 'Paper', 'Questions', or 'AI'. Recorded by
+  // recordComponentState() which is called from switchWorkspaceTab() and
+  // the study-page entry point.
+  component_log: { font: [], food: [], listing: [] },
   quiz_score: 0,
   quiz_total: 0,
 
@@ -1107,13 +1113,15 @@ function finalizeAboutYou() {
 function finalizeStudyTiming(paperId) {
   // Flush and compute the viewport-tracking measures BEFORE duration_ms is
   // touched below -- stopViewportTracking() only writes into
-  // DATA.timing[paperId].{pdf_exposure_proportion_30s,
-  // region_exposed_30s_count,navigation_sequence,backward_transition_count}
-  // and never reads
-  // or sets duration_ms/study_end_ts/study_start_ts, so ordering here only
-  // matters for making sure the final (still-open) viewport segment gets
-  // closed out using "now" rather than some later timestamp.
+  // DATA.timing[paperId].{pdf_exposure_proportion_30s,region_exposed_30s_count,
+  // paper_navigation_sequence,backward_transition_count}
+  // and never reads or sets duration_ms/study_end_ts/study_start_ts, so
+  // ordering here only matters for making sure the final (still-open) viewport
+  // segment gets closed out using "now" rather than some later timestamp.
   stopViewportTracking(paperId);
+  // Commit component-navigation measures (component_navigation_sequence and
+  // component_transition_count) derived from DATA.component_log[paperId].
+  commitComponentMeasures(paperId);
   if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
   DATA.timing[paperId].study_end_ts = nowTs();
   DATA.timing[paperId].study_end_iso = nowIso();
@@ -1134,6 +1142,18 @@ function markStudyStart(slotId) {
   }
   currentStudyPaperId = paperId;
   startViewportTracking(paperId);
+  // Record the initial component state: on study-page entry the PDF tab is
+  // active by default, so the starting component is 'Paper'.
+  recordComponentState(paperId, 'Paper');
+  // Active-interaction triggers: PDF scroll or click re-asserts 'Paper';
+  // response textarea focus asserts 'Questions'. These supplement the tab-
+  // switch triggers in switchWorkspaceTab so that active engagement is
+  // captured even when a tab switch event alone would be ambiguous.
+  const pdfPane = document.getElementById('paperPane-' + paperId);
+  if (pdfPane) {
+    pdfPane.addEventListener('scroll', () => recordComponentState(paperId, 'Paper'), { passive: true, capture: false });
+    pdfPane.addEventListener('click',  () => recordComponentState(paperId, 'Paper'));
+  }
 }
 
 // ---------- Required-response validation ----------
@@ -2116,15 +2136,15 @@ function getStudyPdfImages(paperId) {
 //    EXPOSURE_THRESHOLD_MS for pdf_exposure_proportion_30s.
 //  - AOI (Area-of-Interest) Markov-chain navigation models: we
 //    discretize the viewport's vertical position into named
-//    nine within-page regions and track visits to compute
-//    navigation_sequence and backward_transition_count.
+//    six half-page regions (Top-Half/Bottom-Half per PDF page) and track visits to compute
+//    paper_navigation_sequence and backward_transition_count.
 //  - Lagun & Lalmas (2016) preprocessing requirement: an AOI visit
 //    is only retained in the navigation sequence once its
 //    continuous dwell time reaches MIN_DWELL_MS. This is NOT
 //    optional -- a state a participant passed through for under a
 //    second (e.g. while scrolling past it en route elsewhere) is
 //    not a genuine "visit" to that region and must not appear in
-//    navigation_sequence or backward_transition_count. See aggregateNavigationSequence()
+//    paper_navigation_sequence or backward_transition_count. See aggregateNavigationSequence()
 //    below for the exact 4-step procedure (aggregate consecutive
 //    same-AOI intervals -> drop any whose total is under
 //    MIN_DWELL_MS -> re-collapse newly-adjacent duplicates).
@@ -2132,7 +2152,7 @@ function getStudyPdfImages(paperId) {
 // IMPLEMENTATION ADAPTATIONS (ours, specific to this split-panel
 // survey -- NOT specified by the cited papers):
 //  1. Each of the three actual rendered PDF pages is divided into
-//     Top/Middle/Bottom, yielding six ordered regions. The geometry,
+//     Top-Half/Bottom-Half, yielding two regions per page (six total). The geometry,
 //     overlap-crediting, dominant-state, and hysteresis rules are
 //     study-specific deterministic implementation choices.
 //  2. Exposure-bucket accumulation excludes time when the tab is
@@ -2146,7 +2166,7 @@ function getStudyPdfImages(paperId) {
 //     (#pdfWrap-<paperId>.scrollHeight), NOT the scrollable pane
 //     (#paperPane-<paperId>), so the measure is independent of pane
 //     height and consistent across window sizes.
-//  4. The MIN_DWELL_MS filter applies only to navigation_sequence /
+//  4. The MIN_DWELL_MS filter applies only to paper_navigation_sequence /
 //     backward_transition_count. It
 //     never affects pdf_exposure_proportion_30s, which still credits
 //     a bucket's actual visible/focused milliseconds regardless of
@@ -2161,12 +2181,12 @@ function getStudyPdfImages(paperId) {
 //     Unclassified). A participant who tabs away or alt-tabs out never gets
 //     that dead time credited as a "visit" to whatever region happened to be
 //     on screen, and indeterminate/not-yet-rendered states never appear in
-//     navigation_sequence either.
+//     paper_navigation_sequence either.
 //  6. pdf_exposure_proportion_30s uses a strict > EXPOSURE_THRESHOLD_MS
-//     comparison ("viewport time longer than 5 seconds"), so a bucket
+//     comparison ("viewport time longer than 30 seconds"), so a bucket
 //     exposed for exactly 30000ms does not count -- only buckets exposed for
 //     more than 30000ms do.
-//  7. navigation_sequence does not include explicit Start/Leave sentinel
+//  7. paper_navigation_sequence does not include explicit Start/Leave sentinel
 //     markers. The sequence already implicitly begins when markStudyStart()
 //     starts the tracker and ends when finalizeStudyTiming() stops it, so an
 //     explicit "Start"/"Leave" token in the exported string would only
@@ -2252,8 +2272,8 @@ function getPageGeometry(paperId) {
   return pages;
 }
 
-// Splits each real rendered page into two equal-height regions (Top /
-// Middle / Bottom), producing the six ordered P<n>-Top-Half..P<n>-Bottom-Half
+// Splits each real rendered page into two equal-height regions (Top-Half /
+// Bottom-Half), producing the six ordered P<n>-Top-Half..P<n>-Bottom-Half
 // regions in reading order. Degenerate pages (zero/negative height, e.g. a
 // page whose canvas hasn't actually rendered yet) are skipped rather than
 // producing a malformed region.
@@ -2341,7 +2361,7 @@ function pickDominantRegion(overlaps, regions, previousRegion) {
 // tracker.lastValidDominantRegion as the rolling hysteresis state across
 // calls -- including across hidden/unfocused intervals, since the
 // visible/focused gating that excludes those intervals from
-// navigation_sequence happens later, in filterNavigableSegments(), not
+// paper_navigation_sequence happens later, in filterNavigableSegments(), not
 // here.
 function computeDominantRegion(paperId, range) {
   const tracker = VIEWPORT_TRACKERS[paperId];
@@ -2451,7 +2471,7 @@ function tickSegment(paperId) {
   const { start, end } = bucketIndexRange(seg.top, seg.bottom, contentHeight, tracker.bucketCount);
   for (let i = start; i < end; i += 1) tracker.bucketExposedMs[i] += elapsed;
 
-  // Six-region proportional exposure crediting for region_exposed_30s_count:
+  // Six-region proportional exposure crediting (legacy regionExposedMs accumulator):
   // each region accumulates this tick's elapsed ms multiplied by the
   // fraction of that region's own height which is currently visible, so a
   // viewport straddling the boundary of two regions (e.g. the bottom of one
@@ -2564,7 +2584,7 @@ function aggregateNavigationSequence(rawLog) {
 // hidden-tab time (visible !== true), unfocused-window time (focused !==
 // true), and Unrendered/Unclassified states (see NON_NAVIGABLE_REGIONS
 // above). This runs BEFORE aggregateNavigationSequence(), so hidden/
-// unfocused/indeterminate dwell time can never inflate navigation_sequence
+// unfocused/indeterminate dwell time can never inflate paper_navigation_sequence
 // or backward_transition_count -- matching the same visible/focused gating
 // tickSegment() already applies to pdf_exposure_proportion_30s. Returns
 // plain {region, ms} pairs, the input shape aggregateNavigationSequence()
@@ -2647,15 +2667,13 @@ function stopViewportTracking(paperId) {
   const collapsed = aggregateNavigationSequence(navigable);
   const { backward } = countNavigationTransitions(collapsed);
 
-  // pdf_exposure_proportion_30s: unchanged document-wide bucket calculation
-  // (strict ">30000ms", full rendered content height, visible+focused-gated)
-  // -- this variable's definition did not change between the Phase 2 and
-  // final Phase 3 specs. Blank only when the PDF/page never finished
-  // rendering (tracker.contentReady false or zero buckets); a genuine
-  // measured 0 is preserved.
+  // pdf_exposure_proportion_30s: document-wide bucket proportion exposed for
+  // strictly more than EXPOSURE_THRESHOLD_MS (30000 ms). Blank only when the
+  // PDF/page never finished rendering (tracker.contentReady false or zero
+  // buckets); a genuine measured 0 is preserved.
   let exposureProportion = '';
   if (tracker.contentReady && tracker.bucketExposedMs && tracker.bucketExposedMs.length) {
-    // Strict ">" per spec ("viewport time longer than 5 seconds"): a bucket
+    // Strict ">" per spec ("viewport time longer than 30 seconds"): a bucket
     // exposed for exactly EXPOSURE_THRESHOLD_MS does not count.
     const exposedCount = tracker.bucketExposedMs.reduce(
       (count, ms) => count + (ms > EXPOSURE_THRESHOLD_MS ? 1 : 0),
@@ -2664,28 +2682,41 @@ function stopViewportTracking(paperId) {
     exposureProportion = Number((exposedCount / tracker.bucketExposedMs.length).toFixed(4));
   }
 
-  // region_exposed_30s_count: blank only when real page/PDF geometry never
-  // became available (tracker.regions empty); a genuine 0 (no region ever
-  // crossed the threshold) is preserved.
-  let regionExposedCount = '';
-  if (tracker.regions && tracker.regions.length && tracker.regionExposedMs && tracker.regionExposedMs.length === tracker.regions.length) {
-    regionExposedCount = tracker.regionExposedMs.reduce(
-      (count, ms) => count + (ms > EXPOSURE_THRESHOLD_MS ? 1 : 0),
-      0
-    );
-  }
-
-  // navigation_sequence / backward_transition_count: blank only when no
-  // valid region survived the visible/focused/min-dwell preprocessing
-  // pipeline (collapsed.length === 0) -- a single retained state with zero
-  // transitions is a genuine, measured "0", not a blank.
+  // paper_navigation_sequence / backward_transition_count:
+  // blank only when no valid region survived the visible/focused/min-dwell
+  // preprocessing pipeline (collapsed.length === 0) -- a single retained
+  // state with zero transitions is a genuine, measured "0", not a blank.
   DATA.timing[paperId].pdf_exposure_proportion_30s = exposureProportion;
-  DATA.timing[paperId].region_exposed_30s_count = regionExposedCount;
-  DATA.timing[paperId].navigation_sequence = collapsed.length ? collapsed.join('>') : '';
+  DATA.timing[paperId].region_exposed_30s_count = tracker.regionExposedMs
+    ? tracker.regionExposedMs.reduce((n, ms) => n + (ms > EXPOSURE_THRESHOLD_MS ? 1 : 0), 0)
+    : '';
+  DATA.timing[paperId].paper_navigation_sequence = collapsed.length ? collapsed.join('>') : '';
   DATA.timing[paperId].backward_transition_count = collapsed.length ? backward : '';
 
   if (!DATA.viewport_raw_log) DATA.viewport_raw_log = {};
   DATA.viewport_raw_log[paperId] = tracker.rawLog;
+}
+
+// ---------- Component navigation tracking ----------
+// Records the currently active component for a paper ('Paper', 'Questions',
+// or 'AI') into DATA.component_log[paperId] for later collapse into
+// component_navigation_sequence / component_transition_count at submit time.
+// Consecutive duplicates are collapsed (only state changes are recorded).
+function recordComponentState(paperId, component) {
+  if (!DATA.component_log[paperId]) DATA.component_log[paperId] = [];
+  const log = DATA.component_log[paperId];
+  if (log.length && log[log.length - 1] === component) return; // no-op for no-change
+  log.push(component);
+}
+
+// Collapses a component log into a '>'-separated sequence string and
+// transition count, then writes them into DATA.timing[paperId].
+// Called from commitComponentMeasures() at study-page completion.
+function commitComponentMeasures(paperId) {
+  if (!DATA.timing[paperId]) DATA.timing[paperId] = {};
+  const log = DATA.component_log[paperId] || [];
+  DATA.timing[paperId].component_navigation_sequence = log.join('>');
+  DATA.timing[paperId].component_transition_count = log.length > 0 ? log.length - 1 : 0;
 }
 
 // ---------- AI chat panel ----------
@@ -2698,6 +2729,11 @@ function switchWorkspaceTab(paperId, tab) {
     document.querySelectorAll('.ai-tab-btn').forEach(b => { b.classList.remove('attention'); b.querySelector('.tab-badge')?.remove(); });
     recordAiTabOpened(paperId);
     updateAiRemainingUI(paperId);
+    recordComponentState(paperId, 'AI');
+  } else if (tab === 'paper') {
+    recordComponentState(paperId, 'Paper');
+  } else if (tab === 'questions') {
+    recordComponentState(paperId, 'Questions');
   }
 }
 
@@ -3334,9 +3370,17 @@ function attachLoggingListeners() {
     const id = ta.getAttribute('data-logfield');
     if (ta._loggingAttached) return;
     ta._loggingAttached = true;
-    if (!DATA.logs[id]) DATA.logs[id] = { keystrokes: 0, pastes: 0, drafts: [] };
+    if (!DATA.logs[id]) DATA.logs[id] = { keystrokes: 0, pastes: 0, drafts: [], first_keystroke_ts: null };
     ta._revisionSnapshot = ta.value || '';
-    ta.addEventListener('keydown', () => { DATA.logs[id].keystrokes++; });
+    ta.addEventListener('keydown', () => {
+      DATA.logs[id].keystrokes++;
+      // Capture ISO timestamp of the participant's first keystroke in this
+      // textarea (first_keystroke_ts). Only set once; subsequent keydowns
+      // are ignored for this field.
+      if (!DATA.logs[id].first_keystroke_ts) {
+        DATA.logs[id].first_keystroke_ts = nowIso();
+      }
+    });
     ta.addEventListener('paste', () => {
       DATA.logs[id].pastes++;
     });
@@ -3364,6 +3408,19 @@ function attachLoggingListeners() {
     ta.addEventListener('blur', () => {
       DATA.logs[id].drafts.push({ ts: nowIso(), value: ta.value });
     });
+  });
+
+  // Event delegation for Questions-component tracking. A single focusin or
+  // click listener on each Questions-panel container covers all response
+  // controls (textareas, conf-btn scale buttons, likert-btn scale buttons,
+  // and any future controls) without needing per-element attachment or
+  // re-attachment when controls are re-rendered. focusin is used instead of
+  // focus because focusin bubbles; click covers pointer-driven selections.
+  // Do NOT use mouseover/mouseenter — tracking must require deliberate input.
+  document.querySelectorAll('[id^="questionsTab-"]').forEach(panel => {
+    const pid = panel.id.replace('questionsTab-', '');
+    panel.addEventListener('focusin', () => recordComponentState(pid, 'Questions'));
+    panel.addEventListener('click',   () => recordComponentState(pid, 'Questions'));
   });
 }
 
@@ -4008,7 +4065,7 @@ function computeAuditSummary() {
   const importantFields = [
     'participant_id', 'prolific_id', 'research_role', 'research_expertise_stratum',
     'assignment_cell', 'ai_condition', 'critical_thinking_placement',
-    'assigned_paper_1_id', 'assigned_paper_2_id', 'paper_order',
+    'assigned_paper_1_id', 'paper_order',
     'consent_status', 'quiz_score', 'final_submission_timestamp', 'submission_status'
   ];
   const missingFields = importantFields.filter(f => {

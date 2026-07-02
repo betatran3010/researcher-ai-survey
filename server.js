@@ -78,12 +78,12 @@ if (ENABLE_TEST_MODE) {
 // the Storage SDK.
 const storage = USE_LOCAL_SUBMISSION_FILE ? null : new Storage();
 
-// Firestore-backed assignment balancing (see the assignment section below)
+// Firestore-backed assignment idempotency (see the assignment section below)
 // is used in every environment, including local dev — there is no in-memory
-// or file-based substitute for it, per the requirement that balancing must
-// be exact and transactionally safe under concurrent participants. Local
-// development authenticates to the real Firestore database via the same ADC
-// mechanism (see DEPLOYMENT.md for the exact `gcloud auth application-default
+// or file-based substitute for it, per the requirement that idempotency must
+// be transactionally safe under concurrent requests for the same participant.
+// Local development authenticates to the real Firestore database via the same
+// ADC mechanism (see DEPLOYMENT.md for the exact `gcloud auth application-default
 // login` step).
 //
 // Constructed LAZILY (on first actual use) rather than at module load. The
@@ -292,25 +292,19 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// ---------- Stratified condition/CT-placement + paper-order assignment ----------
-// Exact-balance, Firestore-transaction-backed server-side assignment.
-// Within each expertise stratum, this keeps the four AI x CT-placement cells
-// (AI_pre, AI_post, noAI_pre, noAI_post) and the six ordered two-of-three
-// paper combinations as evenly filled as possible: every new assignment goes
-// to whichever cell (and, independently, whichever paper combo) currently
-// has the LOWEST count in that stratum, with ties broken at random. Counts
-// live in Firestore (assignment_counters/{stratum}) and are read+incremented
-// inside the same transaction as the assignment write, so two participants
-// arriving at the same instant cannot both be assigned based on the same
-// stale counts — Firestore detects the read/write conflict and retries one
-// of the transactions automatically.
+// ---------- Condition/CT-placement + paper assignment ----------
+// Uniform-random, Firestore-transaction-backed server-side assignment.
+// Each new participant is assigned independently at random: one of the four
+// AI x CT-placement cells (AI_pre, AI_post, noAI_pre, noAI_post) and one of
+// the three papers (font, food, listing) are each drawn with equal probability
+// using crypto.randomInt — no balancing counters, no stratification.
 //
 // A participant's assignment is permanent: the result is stored at
 // assignments/{hashedParticipantId}, keyed by a one-way SHA-256 hash of their
 // normalized stable id (Prolific ID, or local fallback UUID) — never the raw
 // id. A repeated request for the same hashed id (refresh, reopening the
 // survey, a different browser/device with the same Prolific ID) returns the
-// EXISTING stored assignment as-is and does not touch the counters again.
+// EXISTING stored assignment as-is without issuing a new random draw.
 // If the request also includes a different research_role than what was
 // originally stored, the original is kept — this is now an authoritative,
 // cross-device guarantee (not just the same-browser localStorage guard the
@@ -318,12 +312,13 @@ app.post('/api/chat', async (req, res) => {
 //
 // Research-expertise stratum is derived here from the exact role string,
 // not trusted from the client, and must match ROLE_OPTIONS in
-// researcher_ai_survey.js exactly.
+// researcher_ai_survey.js exactly. The stratum is stored for analysis only
+// and does not influence which cell or paper is selected.
 //
 // PhD students receive a conditional program-year question.
 // First-year PhD students are classified as lower expertise;
 // second-year-or-later PhD students are classified as higher expertise.
-// Conditional PhD-program-year follow-up used for expertise stratification.
+// Conditional PhD-program-year follow-up used for expertise classification.
 const ROLE_TIER_MAP = {
   'Undergraduate research assistant': 'lower',
   'Post-baccalaureate research assistant or lab manager': 'lower',
@@ -389,13 +384,13 @@ const PAPER_ASSIGNMENTS = [
   { paper_id: 'listing', unassigned_paper_ids: ['font', 'food'] }
 ];
 
-// Bumped to v3 because the assignment structure changed from two ordered
-// papers per participant (v2) to exactly one paper per participant (v3).
-// Per the existing versioning convention, this is just a record of which
-// logic produced a given assignment; it does not by itself reassign anyone.
-const ASSIGNMENT_VERSION = 'v3_firestore_balanced_one_paper';
-const PAPER_ORDER_VERSION = 'v3_firestore_balanced_one_paper';
-const ASSIGNMENT_SOURCE = 'firestore_balanced_transaction';
+// Bumped to v4 because assignment logic changed from expertise-stratified
+// exact-balance (v3) to uniform random (v4). Per the existing versioning
+// convention, this is just a record of which logic produced a given
+// assignment; it does not by itself reassign anyone.
+const ASSIGNMENT_VERSION = 'v4_uniform_random_one_paper';
+const PAPER_ORDER_VERSION = 'v4_uniform_random_one_paper';
+const ASSIGNMENT_SOURCE = 'firestore_uniform_random';
 
 // Canonical normalization for whatever identifier is being hashed (Prolific
 // ID or fallback UUID): trim whitespace and lowercase, so "ABC123", "abc123",
@@ -416,19 +411,6 @@ function hashStableId(normalizedId) {
 }
 
 const ASSIGNMENTS_COLLECTION = 'assignments';
-const ASSIGNMENT_COUNTERS_COLLECTION = 'assignment_counters';
-
-// Returns the index (into `counts`) of the lowest value, breaking ties
-// uniformly at random across all indices tied for lowest. crypto.randomInt
-// is used rather than Math.random() for a better-quality, non-deterministic
-// tie-break (callers cannot predict or influence which tied cell/combo a
-// given request will land in).
-function pickLeastFilledIndex(counts) {
-  const min = Math.min(...counts);
-  const tiedIndices = [];
-  counts.forEach((c, i) => { if (c === min) tiedIndices.push(i); });
-  return tiedIndices[crypto.randomInt(tiedIndices.length)];
-}
 
 app.post('/api/assign-condition', async (req, res) => {
   try {
@@ -456,38 +438,24 @@ app.post('/api/assign-condition', async (req, res) => {
 
     const hashed_participant_id = hashStableId(stable_participant_id);
     const assignmentRef = getFirestore().collection(ASSIGNMENTS_COLLECTION).doc(hashed_participant_id);
-    const counterRef = getFirestore().collection(ASSIGNMENT_COUNTERS_COLLECTION).doc(expertise_stratum);
 
     const assignment = await getFirestore().runTransaction(async (t) => {
-      // Both reads happen before any write, as Firestore transactions
-      // require — this is what lets Firestore detect a concurrent
-      // conflicting transaction and retry one of them automatically.
-      const [assignmentSnap, counterSnap] = await Promise.all([t.get(assignmentRef), t.get(counterRef)]);
+      const assignmentSnap = await t.get(assignmentRef);
 
       if (assignmentSnap.exists) {
         // Idempotent: already-assigned participants (refresh, reopening the
         // survey, a different browser with the same Prolific ID, or a role
         // resubmitted differently than originally) always get back the
-        // ORIGINAL stored assignment untouched. Counters are not incremented
-        // again on this path.
+        // ORIGINAL stored assignment untouched.
         return assignmentSnap.data();
       }
 
-      const counterData = counterSnap.exists ? counterSnap.data() : null;
-      const cellCounts = ASSIGNMENT_CELLS.map(c => (counterData && counterData.cell_counts && counterData.cell_counts[c.cell]) || 0);
-      const paperCounts = PAPER_ASSIGNMENTS.map((p, i) => (counterData && counterData.paper_counts && counterData.paper_counts['paper_' + i]) || 0);
-
-      // The two balancing tasks are independent of each other, per spec:
-      // pick the least-filled cell, and SEPARATELY pick the least-filled
-      // paper identity, within this stratum.
-      const chosenCell = ASSIGNMENT_CELLS[pickLeastFilledIndex(cellCounts)];
-      const chosenPaperIdx = pickLeastFilledIndex(paperCounts);
+      // Uniform random assignment: cell and paper are each drawn independently
+      // with equal probability. No counters, no balancing, no stratum
+      // influence on selection.
+      const chosenCell = ASSIGNMENT_CELLS[crypto.randomInt(ASSIGNMENT_CELLS.length)];
+      const chosenPaperIdx = crypto.randomInt(PAPER_ASSIGNMENTS.length);
       const chosenPaper = PAPER_ASSIGNMENTS[chosenPaperIdx];
-
-      const newCellCounts = Object.assign({}, counterData && counterData.cell_counts);
-      newCellCounts[chosenCell.cell] = (newCellCounts[chosenCell.cell] || 0) + 1;
-      const newPaperCounts = Object.assign({}, counterData && counterData.paper_counts);
-      newPaperCounts['paper_' + chosenPaperIdx] = (newPaperCounts['paper_' + chosenPaperIdx] || 0) + 1;
 
       const assignedAt = new Date().toISOString();
       const assignmentDoc = {
@@ -505,20 +473,12 @@ app.post('/api/assign-condition', async (req, res) => {
         assignment_source: ASSIGNMENT_SOURCE,
         assignment_version: ASSIGNMENT_VERSION,
         paper_order_version: PAPER_ORDER_VERSION,
-        // Kept conceptually and physically separate from assignment_counters
-        // (which only ever counts ASSIGNMENTS): this field is set to
-        // 'completed' later by /api/submit-survey, and is never read or
-        // written by the balancing logic above.
+        // This field is set to 'completed' later by /api/submit-survey and
+        // is never read by the assignment logic.
         completion_status: 'assigned',
         completed_at: null
       };
 
-      t.set(counterRef, {
-        stratum: expertise_stratum,
-        cell_counts: newCellCounts,
-        paper_counts: newPaperCounts,
-        updated_at: assignedAt
-      }, { merge: true });
       t.set(assignmentRef, assignmentDoc);
 
       return assignmentDoc;
@@ -563,8 +523,6 @@ app.get('/api/test-mode-status', (req, res) => {
 // TEST-ONLY assignment endpoint. Computes a forced cell + single paper
 // assignment in-memory and returns it in the same shape as
 // /api/assign-condition, but:
-//   - never reads or writes ASSIGNMENT_COUNTERS_COLLECTION (no balancing
-//     counters are touched, so test runs cannot skew real study balance);
 //   - never reads or writes ASSIGNMENTS_COLLECTION (no permanent Firestore
 //     assignment record is created for a test run);
 //   - only accepts `cell` from TEST_VALID_CELLS and `papers` (optional) as
@@ -1078,4 +1036,3 @@ app.get('/admin/export', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
-
