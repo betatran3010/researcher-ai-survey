@@ -1152,7 +1152,7 @@ function markStudyStart(slotId) {
   const pdfPane = document.getElementById('paperPane-' + paperId);
   if (pdfPane) {
     pdfPane.addEventListener('scroll', () => recordComponentState(paperId, 'Paper'), { passive: true, capture: false });
-    pdfPane.addEventListener('click',  () => recordComponentState(paperId, 'Paper'));
+    pdfPane.addEventListener('click', () => recordComponentState(paperId, 'Paper'));
   }
 }
 
@@ -2135,18 +2135,28 @@ async function renderPDF(url, containerId, paperId) {
   try {
     const pdf = await pdfjsLib.getDocument(url).promise;
     container.innerHTML = '';
-    const dpr = window.devicePixelRatio || 1;
-    const capturedImages = [];
+    const browserPixelRatio = window.devicePixelRatio || 1;
+    const renderPixelRatio = Math.min(
+      3,
+      Math.max(2, browserPixelRatio)
+    );
+
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
       const viewport = page.getViewport({ scale: 1 });
-      const targetWidth = container.clientWidth || 760;
-      const scale = (targetWidth / viewport.width) * dpr;
+
+      const targetWidth = container.clientWidth || 700;
+      const scale =
+        (targetWidth / viewport.width) *
+        renderPixelRatio;
+
       const scaledViewport = page.getViewport({ scale });
+
       const canvas = document.createElement('canvas');
-      canvas.width = scaledViewport.width;
-      canvas.height = scaledViewport.height;
+      canvas.width = Math.floor(scaledViewport.width);
+      canvas.height = Math.floor(scaledViewport.height);
       canvas.style.width = '100%';
+      canvas.style.height = 'auto';
       const ctx = canvas.getContext('2d');
       await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
       container.appendChild(canvas);
@@ -3487,7 +3497,7 @@ function attachLoggingListeners() {
   document.querySelectorAll('[id^="questionsTab-"]').forEach(panel => {
     const pid = panel.id.replace('questionsTab-', '');
     panel.addEventListener('focusin', () => recordComponentState(pid, 'Questions'));
-    panel.addEventListener('click',   () => recordComponentState(pid, 'Questions'));
+    panel.addEventListener('click', () => recordComponentState(pid, 'Questions'));
   });
 }
 
