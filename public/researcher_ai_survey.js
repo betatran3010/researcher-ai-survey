@@ -1169,6 +1169,38 @@ function clearValidationErrors(pageEl) {
 function flagGroupError(container) {
   if (container) container.classList.add('group-error');
 }
+// Minimum word count required for each written evaluation response
+// (strengths / limitations / improvements).
+const MIN_RESPONSE_WORDS = 75;
+const SHORT_RESPONSE_ALERT =
+  'Please add more detail. Your response should be at least 75 words and explain the specific feature and why it matters.';
+
+// Counts words in a response: trims, treats any whitespace run (spaces or line
+// breaks) as a single separator, and returns 0 for blank text.
+function countResponseWords(text) {
+  const trimmed = String(text == null ? '' : text).trim();
+  return trimmed ? trimmed.split(/\s+/).length : 0;
+}
+
+// Remove the red validation state as soon as an evaluation response reaches
+// the required word count. Short responses remain outlined until corrected;
+// blank-response handling continues to use the normal required-field flow.
+function initializeResponseWordValidation() {
+  document.addEventListener('input', event => {
+    const field = event.target;
+    if (!field || field.tagName !== 'TEXTAREA' || !field.hasAttribute('data-logfield')) return;
+
+    const logField = field.getAttribute('data-logfield') || '';
+    const isEvalResponse = /_(strength|limitation|improvement)$/.test(logField);
+    if (!isEvalResponse) return;
+
+    if (countResponseWords(field.value) >= MIN_RESPONSE_WORDS) {
+      field.classList.remove('input-error');
+      field.removeAttribute('aria-invalid');
+    }
+  });
+}
+
 function validateCurrentPage() {
   const pageEl = document.querySelector('.page.active');
   if (!pageEl) return true;
@@ -1192,6 +1224,8 @@ function validateCurrentPage() {
 
   let valid = true;
   let firstInvalid = null;
+  let emptyResponseInvalid = false;
+  let shortResponseInvalid = false;
 
   function markInvalid(element, groupElement) {
     valid = false;
@@ -1234,8 +1268,18 @@ function validateCurrentPage() {
       // AI chat inputs do not have data-logfield, so they are never required.
       if ((!isStudyPage && !isFieldVisible(field)) || field.disabled) return;
 
-      if (!field.value.trim()) {
+      const responseValue = field.value;
+      const logField = field.getAttribute('data-logfield') || '';
+      const isEvalResponse = /_(strength|limitation|improvement)$/.test(logField);
+
+      if (!responseValue.trim()) {
+        // Empty required response: keep the existing unanswered-response behavior.
         markInvalid(field);
+        if (isEvalResponse) emptyResponseInvalid = true;
+      } else if (isEvalResponse && countResponseWords(responseValue) < MIN_RESPONSE_WORDS) {
+        // 1-74 words in an evaluation box: same red outline plus the specific alert.
+        markInvalid(field);
+        shortResponseInvalid = true;
       }
     });
 
@@ -1374,6 +1418,12 @@ function validateCurrentPage() {
     if (invalidNumberInput) {
       const message = getNumberInputError(invalidNumberInput);
       showNumberInputError(invalidNumberInput, message);
+    } else if (emptyResponseInvalid) {
+      showWarnBanner(
+        'Please answer all questions on this page before continuing.'
+      );
+    } else if (shortResponseInvalid) {
+      showWarnBanner(SHORT_RESPONSE_ALERT);
     } else {
       showWarnBanner(
         'Please answer all questions on this page before continuing.'
@@ -1709,7 +1759,17 @@ const INSTRUCTIONS_PAGES_COMMON = [
   },
   {
     paragraphs: [
-      'The study in this task were artificially constructed. When reviewing the study, please apply the same analytical and scientific reasoning and judgment that you would use when assessing real research.'
+      'The studies in this task were artificially constructed. When reviewing each study, please apply the same analytical and scientific reasoning and judgment that you would use when assessing real research.'
+    ]
+  },
+  {
+    paragraphs: [
+      'Your written responses must be [[B]]specific to the study[[/B]]. General statements such as "the aim is clear," "the study is good," "it needs more detail," or "N/A" are not sufficient on their own. For each response, identify the specific feature of the study you are referring to and explain why it strengthens, weakens, or could improve the research.'
+    ]
+  },
+  {
+    paragraphs: [
+      'Please provide enough detail to fully explain your reasoning. As a guide, each response should be about [[B]]75 words or more[[/B]].'
     ]
   },
   {
@@ -1827,6 +1887,13 @@ const INSTRUCTIONS_MOCKUP_SVG_NOAI = `<svg viewBox="0 0 560 280" xmlns="http://w
 // them, one page per click, per mentor comments #4/#5. Mirrors the
 // existing buildQuizPages() pattern (dynamic sub-pages inserted into
 // pageOrder) used for the comprehension quiz.
+// Renders [[B]]...[[/B]] spans in instruction text as bold, matching the
+// existing [[FIVE]]/[[SAME]] bold-token convention. Input is already escaped.
+function applyBold(html) {
+  return String(html == null ? '' : html)
+    .replace(/\[\[B\]\]([\s\S]*?)\[\[\/B\]\]/g, '<strong>$1</strong>');
+}
+
 function buildInstructionsPages() {
   const container = document.getElementById('instructionsPagesContainer');
   if (!container) return;
@@ -1865,7 +1932,7 @@ function buildInstructionsPages() {
 
     const paraHtml = paragraphs
       .map(text => {
-        const safeText = escapeHtml(text)
+        const safeText = applyBold(escapeHtml(text))
           .replace(/\[\[FIVE\]\]/g, '<strong>FIVE</strong>')
           .replace(/\[\[SAME\]\]/g, '<strong>SAME</strong>');
 
@@ -4420,6 +4487,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Turn on immediate feedback for all number inputs, including the
   // dynamically created PhD-year field.
   initializeImmediateNumberValidation();
+  initializeResponseWordValidation();
 
   // ===================== TEST MODE (DEV/QA ONLY) =====================
   // Must resolve before anything else touches the page: on invalid test
