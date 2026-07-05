@@ -1041,6 +1041,10 @@ async function navigate(dir) {
 
   collectFieldsNow();
 
+  // Make sure all data collected from the page is treated as changed before
+  // advanceFromIndex() calls saveProgressNow().
+  markAutosaveDirty();
+
   if (curId === 'page-ai-use-gate' && dir > 0) {
     if (DATA.responses.ai_research_use === 'No') clearConditionalAiResponses();
     buildPageOrder();
@@ -1548,9 +1552,21 @@ function likertItemHtml(name, label, leftLab, rightLab) {
 
 function selectLikert(btn) {
   const name = btn.getAttribute('data-name');
-  document.querySelectorAll(`.likert-btn[data-name="${name}"]`).forEach(b => b.classList.remove('selected'));
+
+  document
+    .querySelectorAll(`.likert-btn[data-name="${name}"]`)
+    .forEach(b => b.classList.remove('selected'));
+
   btn.classList.add('selected');
-  DATA.responses[name] = parseInt(btn.getAttribute('data-val'), 10);
+
+  DATA.responses[name] = parseInt(
+    btn.getAttribute('data-val'),
+    10
+  );
+
+  // Likert controls are buttons, so the generic form change listener
+  // does not detect them.
+  scheduleAutosave();
 }
 
 function renderScale7Block(containerId, items, leftLab, rightLab, append) {
@@ -2105,19 +2121,36 @@ function buildStudyPages() {
 
 function selectConvincing(btn) {
   const name = btn.getAttribute('data-name');
-  const scale = document.querySelector(`.conf-scale[data-name="${name}"]`);
+
+  const scale = document.querySelector(
+    `.conf-scale[data-name="${name}"]`
+  );
+
   if (scale && scale.classList.contains('locked')) {
     showWarnBanner("You can't change your response.");
     return;
   }
-  document.querySelectorAll(`.conf-btn[data-name="${name}"]`).forEach(b => b.classList.remove('selected'));
+
+  document
+    .querySelectorAll(`.conf-btn[data-name="${name}"]`)
+    .forEach(b => b.classList.remove('selected'));
+
   btn.classList.add('selected');
-  DATA.responses[name] = parseInt(btn.getAttribute('data-val'), 10);
+
+  DATA.responses[name] = parseInt(
+    btn.getAttribute('data-val'),
+    10
+  );
+
   if (scale) {
     scale.classList.add('locked');
+
     const card = scale.closest('.q-card');
     if (card) card.classList.add('locked-question');
   }
+
+  // These controls are buttons, so they need explicit autosave scheduling.
+  scheduleAutosave();
 }
 
 function renderStudyPdfIfNeeded(paperId) {
