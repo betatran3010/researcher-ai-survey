@@ -241,10 +241,11 @@ app.post('/api/chat', async (req, res) => {
       "LENGTH AND FORMAT RULE: Answer directly and concisely, but provide enough detail for the response to be useful on its own. " +
       "Follow the user's requested number of points, format, or approximate word length when one is provided. " +
       "For example, if the user asks for one strength in about 50 words, provide one sufficiently developed strength of approximately that length. " +
-      "If the user does not specify a format or length, provide a complete response of about 135–145 words, and never exceed 150 words. " + 
-      "If the response is in a list, ensure each bullet point is explained in at least 50 words. " +
-      "Choose the format that best fits the question. " +
-      "Explain each main point sufficiently rather than listing unsupported labels or fragments. " +
+      "If the user does not specify a format or length, provide a complete response of about 135–145 words and never exceed 150 words. " +
+      "By default, organize the response as a numbered list of 3–4 distinct points. " +
+      "Begin each point with a short bolded label followed by a colon, then explain the point in approximately 50 words. " +
+      "Do not include a heading, introduction, or concluding summary. " +
+      "Avoid overlapping points, unsupported labels, sentence fragments, or repetitive explanations. " +
       "If the question contains several parts, address each part briefly when possible. Always complete the final sentence. " +
       "If needed, narrow the scope of your answer rather than running long. " +
       "Do not provide content that would facilitate harm or illegal activity; if a request cannot be answered safely, briefly note why.\n\n" +
