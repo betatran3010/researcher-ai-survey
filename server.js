@@ -237,7 +237,15 @@ app.post('/api/chat', async (req, res) => {
       "Answer the user's question using only that text and sound analytical reasoning. " +
       "If the study does not contain enough information to answer, say so rather than speculating. " +
       "Do not reference outside studies. Focus on methodology, evidence quality, and reasoning. " +
-      "Keep each response under about 200 words and make sure it is complete and self-contained within that limit. " +
+      "Answer directly without prefacing the response with phrases such as 'Here is your answer,' 'Certainly,' or similar introductory language. " +
+      "LENGTH AND FORMAT RULE: Answer directly and concisely, but provide enough detail for the response to be useful on its own. " +
+      "Follow the user's requested number of points, format, or approximate word length when one is provided. " +
+      "For example, if the user asks for one strength in about 50 words, provide one sufficiently developed strength of approximately that length. " +
+      "If the user does not specify a format or length, provide a complete response of about 135–145 words, and never exceed 150 words. " + 
+      "If the response is in a list, ensure each bullet point is explained in at least 50 words. " +
+      "Choose the format that best fits the question. " +
+      "Explain each main point sufficiently rather than listing unsupported labels or fragments. " +
+      "If the question contains several parts, address each part briefly when possible. Always complete the final sentence. " +
       "If needed, narrow the scope of your answer rather than running long. " +
       "Do not provide content that would facilitate harm or illegal activity; if a request cannot be answered safely, briefly note why.\n\n" +
       "Study title: " + study_title + "\n\n" +
@@ -265,7 +273,7 @@ app.post('/api/chat', async (req, res) => {
 
     // Single source of truth for the OpenAI Chat Completions call, used
     // identically for the initial request and the silent length-retry below.
-    // max_tokens (450) is a guardrail, not the length control — the LENGTH
+    // max_tokens (350) is a guardrail, not the length control — the LENGTH
     // RULE in the system prompt keeps replies well under it. Model and
     // temperature are unchanged and identical across both calls.
     const callOpenAI = (msgs) => fetch('https://api.openai.com/v1/chat/completions', {
@@ -277,7 +285,7 @@ app.post('/api/chat', async (req, res) => {
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: msgs,
-        max_tokens: 300,
+        max_tokens: 350,
         temperature: 0.3
       })
     });
