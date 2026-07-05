@@ -275,13 +275,13 @@ const CT_SCALE_NOTE = '1 = Not at all true for me, 7 = Very true for me';
 // paper as in the previous version.
 const STANDARD_Q_DEFS = [
   {
-    suffix: 'strength', type: 'text', label: 'Identify one strength of this study.'
+    suffix: 'strength', type: 'text', label: 'Identify strength(s) of this study.'
   },
   {
-    suffix: 'limitation', type: 'text', label: 'Identify one limitation of this study.'
+    suffix: 'limitation', type: 'text', label: 'Identify limitation(s) of this study.'
   },
   {
-    suffix: 'improvement', type: 'text', label: 'Suggest one improvement or follow-up experiment.'
+    suffix: 'improvement', type: 'text', label: 'Suggest improvement(s) or follow-up experiment(s) for this study.'
   },
   {
     suffix: 'understood', type: 'scale7', label: 'How well do you feel you understood this paper?',
