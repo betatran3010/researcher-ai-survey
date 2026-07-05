@@ -1745,7 +1745,7 @@ const INSTRUCTIONS_PAGES_COMMON = [
   },
   {
     paragraphs: [
-      'Please provide enough detail to fully explain your reasoning. As a guide, each response should be about [[B]]75 words or more[[/B]].'
+      'Please provide enough detail to fully explain your reasoning. As a guide, each response should be about [[B]]75 words or more (around 5 sentences) [[/B]].'
     ]
   },
   {
