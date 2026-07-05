@@ -344,7 +344,7 @@ const PAPERS = {
   },
   food: {
     id: 'food',
-    title: 'Does Food Processing Change Blood Sugar and Insulin Responses to a Calorie-Matched Lunch?',
+    title: 'Matched Calories, Matched Responses? Comparing Post-Lunch Metabolic Patterns',
     pdfFile: 'papers/food.pdf',
     quiz: [
       {
@@ -451,13 +451,13 @@ const TEST_VALID_PAPER_IDS = PAPER_IDS; // ['font','food','listing'] — kept as
 
 let TEST_MODE_ACTIVE = false;          // only ever set true after server confirms ENABLE_TEST_MODE
 let TEST_MODE_CELL = null;             // validated cell override, e.g. "AI_pre"
-let TEST_MODE_PAPERS = null;           // validated 2-element papers override, or null (use default order)
+let TEST_MODE_PAPERS = null;           // validated one-paper override, or null (use default paper)
 
 // Parses and whitelist-validates the ?test=1&cell=...&papers=... params.
 // Returns { requested: boolean, valid: boolean, cell, papers, error }.
 // Never trusts free-form input past this point — cell must be an exact
-// member of TEST_VALID_CELLS, and papers (if present) must be exactly two
-// DISTINCT members of TEST_VALID_PAPER_IDS.
+// member of TEST_VALID_CELLS, and papers (if present) must contain exactly
+// one member of TEST_VALID_PAPER_IDS.
 function parseTestModeParams() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('test') !== '1') {
@@ -570,49 +570,25 @@ function hasPriorResearchAiUse() {
   return DATA.responses.ai_research_use === 'Yes';
 }
 
+// Page order + section numbering are computed by the shared, pure
+// window.SurveyRouting module (public/survey-routing.js), so the exact
+// ordering rules can be unit-tested in Node and used unchanged here. See that
+// file for the full CT-before / CT-after ordering spec.
 function buildPageOrder() {
-  const order = ['page-consent', 'page-about-you', 'page-srl', 'page-ai-use-gate'];
-  const hasAiUse = hasPriorResearchAiUse();
-
-  if (hasAiUse) {
-    order.push('page-ai-experience');
-  }
-
-  if (DATA.ct_scale_placement === 'pre') {
-    order.push('page-ct');
-    if (hasAiUse) order.push('page-ai-evaluation');
-  }
-
-  if (INSTRUCTIONS_PAGE_IDS.length > 0) {
-    order.push(...INSTRUCTIONS_PAGE_IDS);
-  }
-
-  order.push('page-study-1');
-
-  if (DATA.ct_scale_placement === 'post') {
-    order.push('page-ct');
-    if (hasAiUse) order.push('page-ai-evaluation');
-  }
-
-  order.push('page-quiz-intro');
-  order.push(...QUIZ_PAGE_IDS);
-  order.push('page-debrief', 'page-submitted');
-
-  pageOrder = order;
+  pageOrder = window.SurveyRouting.computePageOrder(
+    DATA.ct_scale_placement,
+    hasPriorResearchAiUse(),
+    INSTRUCTIONS_PAGE_IDS,
+    QUIZ_PAGE_IDS
+  );
   applySectionNumbers();
 }
 
 function applySectionNumbers() {
-  const pre = DATA.ct_scale_placement === 'pre';
-  const hasAiUse = hasPriorResearchAiUse();
-  const map = pre
-    ? (hasAiUse
-      ? { about_you: 1, srl: 2, ai_use_gate: 3, ai_experience: 3, ct: 4, ai_evaluation: 5, task: 6, quiz: 7, debrief: 8 }
-      : { about_you: 1, srl: 2, ai_use_gate: 3, ct: 4, task: 5, quiz: 6, debrief: 7 })
-    : (hasAiUse
-      ? { about_you: 1, srl: 2, ai_use_gate: 3, ai_experience: 3, task: 4, ct: 5, ai_evaluation: 6, quiz: 7, debrief: 8 }
-      : { about_you: 1, srl: 2, ai_use_gate: 3, task: 4, ct: 5, quiz: 6, debrief: 7 });
-
+  const map = window.SurveyRouting.computeSectionNumbers(
+    DATA.ct_scale_placement,
+    hasPriorResearchAiUse()
+  );
   Object.keys(map).forEach(k => {
     const el = document.getElementById('secnum-' + k.replace(/_/g, '-'));
     if (el) el.textContent = map[k];
@@ -691,7 +667,7 @@ function writeAssignmentCache(stableId, record) {
   }
 }
 
-// ---------- Stratified random assignment ----------
+// ---------- Persistent server-side balanced assignment ----------
 // Assignment happens exactly once per page-about-you visit, and is then
 // frozen for the rest of the session by being written into DATA. A full
 // browser refresh currently restarts the page flow from consent (existing,
@@ -781,9 +757,9 @@ async function assignConditionAndOrder(researchRole, researchRoleYears) {
 
   document.body.classList.add(DATA.ai_condition === 'AI' ? 'condition-ai' : 'condition-noai');
 
-  // Paper selection/order is now ALSO a deterministic server hash (separate
-  // from the condition/CT hash above), keyed by the same stable id, so it
-  // survives refresh/repeat requests exactly like the condition does.
+  // The server returns the participant's permanent one-paper assignment.
+  // Firestore idempotency ensures the same stable id receives the same paper
+  // after refreshes or repeat requests.
   const order = Array.isArray(data.paper_order) ? data.paper_order.slice(0, 1) : [];
   const unassigned = Array.isArray(data.unassigned_paper_ids) ? data.unassigned_paper_ids : [];
   if (order.length !== 1 || !PAPERS[order[0]]) throw new Error('Server returned an invalid one-paper assignment.');
@@ -1905,8 +1881,13 @@ function buildInstructionsPages() {
     isAI ? INSTRUCTIONS_PAGES_AI_ONLY : INSTRUCTIONS_PAGES_NOAI_ONLY
   );
 
-  const taskSectionNumber =
-    DATA.ct_scale_placement === 'pre' ? 5 : 4;
+  // Derive the task section number from the same single source of truth used
+  // by applySectionNumbers(), so the instruction-page headers can never drift
+  // from the rebuilt page order (it depends on placement AND prior-AI-use).
+  const taskSectionNumber = window.SurveyRouting.computeSectionNumbers(
+    DATA.ct_scale_placement,
+    hasPriorResearchAiUse()
+  ).task;
 
   container.innerHTML = '';
 

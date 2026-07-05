@@ -1,7 +1,11 @@
 'use strict';
 const test=require('node:test'); const assert=require('node:assert/strict'); const fs=require('node:fs'); const path=require('node:path');
 const src=fs.readFileSync(path.join(__dirname,'..','public','researcher_ai_survey.js'),'utf8');
-test('frontend page order contains only one study page',()=>{assert.match(src,/order\.push\('page-study-1'\)/);assert.doesNotMatch(src,/order\.push\([\s\S]{0,100}'page-study-2'/);});
+// Page-order/section-numbering logic now lives in the shared, pure
+// public/survey-routing.js module (see test/frontend-routing.test.js for the
+// behavioral tests); assertions about ordering read it here.
+const routing=fs.readFileSync(path.join(__dirname,'..','public','survey-routing.js'),'utf8');
+test('frontend page order contains only one study page',()=>{assert.match(routing,/order\.push\('page-study-1'\)/);assert.doesNotMatch(routing,/'page-study-2'/);});
 test('frontend consumes unassigned_paper_ids plural',()=>{assert.match(src,/data\.unassigned_paper_ids/);assert.doesNotMatch(src,/data\.unassigned_paper_id(?!s)/);});
 test('participant instructions use one-study wording',()=>{assert.match(src,/You will now read one short research study\./);assert.doesNotMatch(src,/You will now read two short research studies/);});
 test('test-mode paper override requires one paper',()=>{assert.match(src,/papers\.length === 1/);});
@@ -25,14 +29,19 @@ test('revised SRL items use construct-named keys in exact order',()=>{
   }
 });
 test('AI research-use gate controls conditional pages without changing assignment request',()=>{
-  assert.match(src,/const order = \['page-consent', 'page-about-you', 'page-srl', 'page-ai-use-gate'\]/);
-  assert.match(src,/if \(hasAiUse\) \{\s*order\.push\('page-ai-experience'\)/);
-  assert.match(src,/if \(hasAiUse\) order\.push\('page-ai-evaluation'\)/);
+  // Ordering lives in survey-routing.js: the base sequence, the AI-use gate,
+  // and the prior-AI-use-gated experience/evaluation pages.
+  assert.match(routing,/const order = \['page-consent', 'page-about-you', 'page-srl'\]/);
+  assert.match(routing,/order\.push\('page-ai-use-gate'\)/);
+  assert.match(routing,/if \(hasAiUse\) order\.push\('page-ai-experience'\)/);
+  assert.match(routing,/if \(hasAiUse\) order\.push\('page-ai-evaluation'\)/);
+  // The assignment request itself is unchanged and never sends the AI-use answer.
   assert.match(src,/body: JSON\.stringify\(\{\s*stable_participant_id: stableId,\s*research_role: effectiveRole/);
   assert.doesNotMatch(src,/assign-condition[\s\S]{0,300}ai_research_use/);
 });
 test('general CT is always included and AI evaluation follows it when applicable',()=>{
-  assert.match(src,/order\.push\('page-ct'\);\s*if \(hasAiUse\) order\.push\('page-ai-evaluation'\)/);
+  // In the CT-after branch, page-ct is followed by the prior-AI-use-gated CT-with-AI page.
+  assert.match(routing,/order\.push\('page-ct'\);\s*if \(hasAiUse\) order\.push\('page-ai-evaluation'\)/);
 });
 test('AI gate clears skipped conditional responses and rebuilds page order',()=>{
   assert.match(src,/function clearConditionalAiResponses\(\)/);

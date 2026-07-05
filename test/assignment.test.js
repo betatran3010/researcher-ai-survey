@@ -6,13 +6,14 @@
 // real Firestore project, because /api/test-assign-condition deliberately
 // never touches ASSIGNMENTS_COLLECTION.
 //
-// /api/assign-condition (the real, Firestore-transaction-backed uniform-random
-// endpoint) is NOT exercised here, for the same reason
+// /api/assign-condition (the real, Firestore-transaction-backed count-based
+// balancing endpoint) is NOT exercised here, for the same reason
 // test/admin-endpoints.test.js never calls Firestore/GCS-dependent routes:
 // this environment has no GCP credentials or Firestore emulator available.
-// Verifying the real uniform-random draw across all 3 papers and the 4
-// AI x CT cells, and the idempotent re-assignment behavior, remains a
-// manual/emulator-backed test (see final report).
+// The balancing SELECTION logic and the transaction body are instead unit-
+// tested directly (without a live Firestore) in test/assignment-balancing.test.js
+// via lib/assignment-balancing.js; end-to-end verification against a real
+// Firestore/emulator remains a manual step (see final report).
 //
 // Run with: npm run test:export (invoked together with export.test.js,
 // admin-endpoints.test.js, viewport.test.js)
@@ -105,8 +106,8 @@ test('valid single-paper override returns exactly one assigned paper and two una
   assert.equal(body.paper_order.length, 1);
   assert.deepEqual(body.unassigned_paper_ids.slice().sort(), ['font', 'listing']);
   assert.equal(body.unassigned_paper_ids.length, 2);
-  assert.equal(body.assignment_version, 'v4_uniform_random_one_paper');
-  assert.equal(body.paper_order_version, 'v4_uniform_random_one_paper');
+  assert.equal(body.assignment_version, 'v5_balanced_counts_one_paper');
+  assert.equal(body.paper_order_version, 'v5_balanced_counts_one_paper');
   assert.equal(body.assignment_cell, 'AI_pre');
   assert.equal(body.assignment_source, 'test_mode_override');
 });

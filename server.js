@@ -1,4 +1,5 @@
 // server.js — Express backend for the researcher AI survey.
+//
 // Holds the OpenAI API key as a server-side environment variable ONLY.
 // The frontend never sees the key; it calls /api/chat on this server,
 // and this server calls the OpenAI API.
@@ -12,6 +13,13 @@ const crypto = require('crypto');
 const { Storage } = require('@google-cloud/storage');
 const { Firestore } = require('@google-cloud/firestore');
 const { cleanRecord, buildAccumulatedCsv, buildAiTranscriptCsv } = require('./lib/export-csv');
+const {
+  ASSIGNMENT_CELLS,
+  PAPER_IDS,
+  COUNTER_COLLECTION,
+  COUNTER_DOC_ID,
+  assignWithinTransaction
+} = require('./lib/assignment-balancing');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -293,11 +301,23 @@ app.post('/api/chat', async (req, res) => {
 });
 
 // ---------- Condition/CT-placement + paper assignment ----------
-// Uniform-random, Firestore-transaction-backed server-side assignment.
-// Each new participant is assigned independently at random: one of the four
-// AI x CT-placement cells (AI_pre, AI_post, noAI_pre, noAI_post) and one of
-// the three papers (font, food, listing) are each drawn with equal probability
-// using crypto.randomInt — no balancing counters, no stratification.
+// Count-based ("balanced"), Firestore-transaction-backed server-side
+// assignment. Each new participant is assigned by HIERARCHICAL balancing that
+// reads the current running counts before choosing (see
+// lib/assignment-balancing.js for the full algorithm and counter-document
+// shape):
+//   1. Pick the primary AI x CT-placement cell (AI_pre, AI_post, noAI_pre,
+//      noAI_post) with the lowest running count; ties are broken by a secure
+//      random pick among ONLY the tied cells.
+//   2. Within that cell, pick the paper (font, food, listing) with the lowest
+//      running count; ties are broken among ONLY the tied papers.
+// Four-cell balance is the primary target; paper balance is nested within the
+// chosen cell. The running counts live in a single Firestore document
+// (assignment_counters/counts) and are incremented in the SAME transaction as
+// the new assignment, so the assignment and the counters can never be left
+// partially updated and the scheme is safe under concurrent participants,
+// multiple Cloud Run instances, and retries. Balancing NEVER reads role,
+// expertise, or demographics.
 //
 // A participant's assignment is permanent: the result is stored at
 // assignments/{hashedParticipantId}, keyed by a one-way SHA-256 hash of their
@@ -365,32 +385,29 @@ function deriveExpertiseStratum(
   return ROLE_TIER_MAP[research_role] || null;
 }
 
-// The four cells within each stratum. Index in this array is what hashed
-// values are mapped onto via modulo — order matters for reproducibility,
-// but is otherwise arbitrary.
-const ASSIGNMENT_CELLS = [
-  { ai_condition: 'AI', ct_placement: 'pre', cell: 'AI_pre' },
-  { ai_condition: 'AI', ct_placement: 'post', cell: 'AI_post' },
-  { ai_condition: 'noAI', ct_placement: 'pre', cell: 'noAI_pre' },
-  { ai_condition: 'noAI', ct_placement: 'post', cell: 'noAI_post' }
-];
+// The four primary experimental cells. Imported from the balancing module so
+// there is a single source of truth shared by the live assignment path, the
+// test-mode override endpoint, and the reconciliation script.
+// (ASSIGNMENT_CELLS and PAPER_IDS are required at the top of this file.)
 
-// The 3-paper pool. Each participant is assigned exactly ONE paper; the
-// other two are recorded as unassigned_paper_ids. Kept in sync with
-// PAPER_IDS / PAPERS in researcher_ai_survey.js.
-const PAPER_ASSIGNMENTS = [
-  { paper_id: 'font', unassigned_paper_ids: ['food', 'listing'] },
-  { paper_id: 'food', unassigned_paper_ids: ['font', 'listing'] },
-  { paper_id: 'listing', unassigned_paper_ids: ['font', 'food'] }
-];
+// The 3-paper pool. Each participant is assigned exactly ONE paper; the other
+// two are recorded as unassigned_paper_ids. Derived from PAPER_IDS so it can
+// never drift from the balancing module or researcher_ai_survey.js.
+const PAPER_ASSIGNMENTS = PAPER_IDS.map(p => ({
+  paper_id: p,
+  unassigned_paper_ids: PAPER_IDS.filter(x => x !== p)
+}));
 
-// Bumped to v4 because assignment logic changed from expertise-stratified
-// exact-balance (v3) to uniform random (v4). Per the existing versioning
-// convention, this is just a record of which logic produced a given
-// assignment; it does not by itself reassign anyone.
-const ASSIGNMENT_VERSION = 'v4_uniform_random_one_paper';
-const PAPER_ORDER_VERSION = 'v4_uniform_random_one_paper';
-const ASSIGNMENT_SOURCE = 'firestore_uniform_random';
+// Bumped to v5 because assignment logic changed from uniform random (v4) to
+// persistent count-based balancing (v5): each new participant is assigned to
+// the least-filled primary cell and, within it, the least-filled paper, using
+// running counts kept in assignment_counters/counts. Per the existing
+// versioning convention, this is just a record of which logic produced a given
+// assignment; it does not by itself reassign anyone, and older assignment
+// documents keep their original version label untouched.
+const ASSIGNMENT_VERSION = 'v5_balanced_counts_one_paper';
+const PAPER_ORDER_VERSION = 'v5_balanced_counts_one_paper';
+const ASSIGNMENT_SOURCE = 'firestore_balanced_counts';
 
 // Canonical normalization for whatever identifier is being hashed (Prolific
 // ID or fallback UUID): trim whitespace and lowercase, so "ABC123", "abc123",
@@ -437,38 +454,28 @@ app.post('/api/assign-condition', async (req, res) => {
     }
 
     const hashed_participant_id = hashStableId(stable_participant_id);
-    const assignmentRef = getFirestore().collection(ASSIGNMENTS_COLLECTION).doc(hashed_participant_id);
+    const firestore = getFirestore();
+    const assignmentRef = firestore.collection(ASSIGNMENTS_COLLECTION).doc(hashed_participant_id);
+    const counterRef = firestore.collection(COUNTER_COLLECTION).doc(COUNTER_DOC_ID);
 
-    const assignment = await getFirestore().runTransaction(async (t) => {
-      const assignmentSnap = await t.get(assignmentRef);
-
-      if (assignmentSnap.exists) {
-        // Idempotent: already-assigned participants (refresh, reopening the
-        // survey, a different browser with the same Prolific ID, or a role
-        // resubmitted differently than originally) always get back the
-        // ORIGINAL stored assignment untouched.
-        return assignmentSnap.data();
-      }
-
-      // Uniform random assignment: cell and paper are each drawn independently
-      // with equal probability. No counters, no balancing, no stratum
-      // influence on selection.
-      const chosenCell = ASSIGNMENT_CELLS[crypto.randomInt(ASSIGNMENT_CELLS.length)];
-      const chosenPaperIdx = crypto.randomInt(PAPER_ASSIGNMENTS.length);
-      const chosenPaper = PAPER_ASSIGNMENTS[chosenPaperIdx];
-
+    // Builds the participant's assignment document from the balanced cell/paper
+    // choice. Participant-specific fields (role, stratum) live here; the
+    // cell/paper selection and counter bookkeeping live in the balancing
+    // module. research_expertise_stratum is still STORED for analysis/backward
+    // compatibility, but it plays no part in balancing.
+    function makeAssignmentDoc(choice, unassignedPaperIds) {
       const assignedAt = new Date().toISOString();
-      const assignmentDoc = {
+      return {
         hashed_participant_id,
         research_role,
         research_role_years,
         research_expertise_stratum: expertise_stratum,
-        ai_condition: chosenCell.ai_condition,
-        critical_thinking_placement: chosenCell.ct_placement,
-        assignment_cell: chosenCell.cell,
-        paper_ids: [chosenPaper.paper_id],
-        paper_order: [chosenPaper.paper_id],
-        unassigned_paper_ids: chosenPaper.unassigned_paper_ids,
+        ai_condition: choice.cell.ai_condition,
+        critical_thinking_placement: choice.cell.ct_placement,
+        assignment_cell: choice.cell.cell,
+        paper_ids: [choice.paper_id],
+        paper_order: [choice.paper_id],
+        unassigned_paper_ids: unassignedPaperIds,
         assigned_at: assignedAt,
         assignment_source: ASSIGNMENT_SOURCE,
         assignment_version: ASSIGNMENT_VERSION,
@@ -478,10 +485,20 @@ app.post('/api/assign-condition', async (req, res) => {
         completion_status: 'assigned',
         completed_at: null
       };
+    }
 
-      t.set(assignmentRef, assignmentDoc);
-
-      return assignmentDoc;
+    const assignment = await firestore.runTransaction(async (t) => {
+      // Hierarchical count-based balancing. For a returning participant the
+      // ORIGINAL stored assignment is returned unchanged and the counters are
+      // not touched; for a new participant the least-filled cell + least-filled
+      // paper-within-cell are chosen and both counters are incremented in this
+      // same transaction. See lib/assignment-balancing.js.
+      const { assignment: doc } = await assignWithinTransaction(t, {
+        assignmentRef,
+        counterRef,
+        makeAssignmentDoc
+      });
+      return doc;
     });
 
     return res.json({
