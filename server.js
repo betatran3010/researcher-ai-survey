@@ -236,9 +236,8 @@ app.post('/api/chat', async (req, res) => {
       "The full text of the study is provided in this conversation, and you may also be shown images of the study pages so you can inspect figures, tables, and other visual elements. " +
       "Answer the user's question using only the supplied study and sound analytical reasoning. If the study does not contain enough information to answer, say so rather than speculating. " +
       "Do not reference studies outside this task. Focus on methodology, evidence quality, and reasoning. " +
-      "Keep each response under about 200 words and no more than five sentences, and make it complete and self-contained within that limit. " +
-      "Format responses for easy reading in a narrow chat panel using short paragraphs or a brief numbered list; avoid large headings and do not place several numbered points in one paragraph. " +
-      "If needed, narrow the scope of the answer rather than running long. " +
+      "LENGTH RULE: Reply using either no more than 3 concise prose sentences or no more than 3 bullet points with one concise sentence per bullet. Never combine the two formats. Do not use headings, sub-bullets, introductions, or concluding summaries. Keep the entire response under 120 words. " +
+      "Address the user's main question directly. If the question contains several parts, cover them briefly when possible, but prioritize the most important information rather than elaborating on every possible point. Always complete the final sentence. " +
       "Do not provide content that would facilitate harm or illegal activity; if a request cannot be answered safely, briefly note why.\n\n" +
       "Study title: " + study_title + "\n\n" +
       "Study text:\n" + study_text;
@@ -263,7 +262,12 @@ app.post('/api/chat', async (req, res) => {
       messages.push({ role: 'user', content: user_message });
     }
 
-    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+    // Single source of truth for the OpenAI Chat Completions call, used
+    // identically for the initial request and the silent length-retry below.
+    // max_tokens (450) is a guardrail, not the length control — the LENGTH
+    // RULE in the system prompt keeps replies well under it. Model and
+    // temperature are unchanged and identical across both calls.
+    const callOpenAI = (msgs) => fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -271,11 +275,13 @@ app.post('/api/chat', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
-        messages,
-        max_tokens: 300,
+        messages: msgs,
+        max_tokens: 450,
         temperature: 0.3
       })
     });
+
+    const openaiResponse = await callOpenAI(messages);
 
     if (!openaiResponse.ok) {
       const errText = await openaiResponse.text().catch(() => '');
@@ -284,15 +290,57 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const data = await openaiResponse.json();
-    const reply = data?.choices?.[0]?.message?.content;
+    const choice = data?.choices?.[0];
+    let reply = choice?.message?.content;
+    const finishReason = choice?.finish_reason;
     if (!reply) {
       console.error('[api/chat] OpenAI response missing content', JSON.stringify(data));
       return res.status(502).json({ error: 'The AI assistant could not respond right now. Please try again.' });
     }
 
+    // If the model hit the token guardrail, the reply may be cut off
+    // mid-thought. Handle this SILENTLY and server-side only: participants
+    // never see any truncation notice, banner, retry, or finish_reason — only
+    // a normal final reply. Make ONE retry that asks for a shorter, complete
+    // rewrite. The retry is NOT a new participant message and advances no
+    // turn counter (conversation_history is untouched).
+    if (finishReason === 'length') {
+      console.warn('[api/chat] reply truncated by token limit; retrying silently', { participant_id, paper_id });
+
+      // Fresh messages array (the original is never mutated) with a one-off
+      // rewrite instruction appended.
+      const retryMessages = messages.concat([{
+        role: 'user',
+        content: 'Rewrite the answer as a complete response under 90 words. Use at most 3 concise sentences or 3 bullet points with one concise sentence per bullet. Do not include an introduction, heading, sub-bullets, or conclusion. Preserve the most important content and finish every sentence.'
+      }]);
+
+      try {
+        const retryResponse = await callOpenAI(retryMessages);
+        if (!retryResponse.ok) {
+          const retryErrText = await retryResponse.text().catch(() => '');
+          console.error('[api/chat] silent retry OpenAI API error', retryResponse.status, retryErrText);
+          return res.status(502).json({ error: 'The AI assistant could not respond right now. Please try again.' });
+        }
+        const retryData = await retryResponse.json();
+        const retryChoice = retryData?.choices?.[0];
+        const retryReply = retryChoice?.message?.content;
+        // Only accept a retry that is both present AND complete.
+        if (!retryReply || retryChoice?.finish_reason === 'length') {
+          console.error('[api/chat] silent retry did not yield a complete reply', JSON.stringify(retryData));
+          return res.status(502).json({ error: 'The AI assistant could not respond right now. Please try again.' });
+        }
+        reply = retryReply;
+      } catch (retryErr) {
+        console.error('[api/chat] silent retry threw', retryErr);
+        return res.status(502).json({ error: 'The AI assistant could not respond right now. Please try again.' });
+      }
+    }
+
     // Server-side log (participant_id, paper_id, condition, turn count) — no API key, no provider error details to client.
     console.log('[api/chat]', { participant_id, condition, paper_id, turn: conversation_history.length + 1 });
 
+    // Only the final reply is returned — never finish_reason, truncation, or
+    // retry metadata.
     return res.json({ reply });
   } catch (err) {
     console.error('[api/chat] Unexpected error', err);

@@ -25,7 +25,7 @@ test('official uses the corrected artificial-study instruction', () => {
 test('official includes the two new instruction pages in the requested order', () => {
   const artificial = src.indexOf('The studies in this task were artificially constructed.');
   const specific = src.indexOf('Your written responses must be [[B]]specific to the study[[/B]].');
-  const fiftyWords = src.indexOf('each response should be about [[B]]50 words or more (around 3 sentences) [[/B]].');
+  const fiftyWords = src.indexOf('each response should be about [[B]]50 words or more (around 3 sentences)[[/B]].');
   const outsideTools = src.indexOf('Please complete the task without using any outside tools or resources.');
 
   assert.ok(artificial !== -1);
