@@ -3989,29 +3989,41 @@ function buildQuizPages() {
   container.innerHTML = html;
 }
 
-function finishQuiz() {
+// Single source of truth for quiz scoring + answer conversion, shared by
+// partial autosaves AND final submission. It reads the current DOM selections
+// and writes ONLY into DATA — it never calls scheduleAutosave()/saveProgressNow()
+// itself, so it is safe to call from collectFieldsNow() and change handlers
+// without recursion. Because it runs on every quiz-radio change and on every
+// autosave path, partial progress is always serialized with the stable,
+// analysis-ready fields and current score that lib/export-csv.js expects.
+function syncQuizProgress() {
   let score = 0, total = 0;
   DATA.quiz_paper_scores = { font: null, food: null, listing: null };
 
   DATA.study_order.forEach(paperId => {
+    const paper = PAPERS[paperId];
+    if (!paper) return;
     let paperScore = 0;
-    PAPERS[paperId].quiz.forEach((qObj, qi) => {
+    paper.quiz.forEach((qObj, qi) => {
+      // quiz_total counts the FULL assigned set (5 in the one-paper design),
+      // independent of how many questions are answered so far.
       total++;
       const name = 'quiz_' + paperId + '_' + qi;
       const chosen = document.querySelector(`input[name="${name}"]:checked`);
       const displayedLetter = chosen ? chosen.value : null;
 
-      // Preserve scoring against the randomized displayed letter.
-      const correctLetter = QUIZ_RUNTIME_CORRECT[name] || qObj.correct;
-
-      if (displayedLetter === correctLetter) {
+      // Score ONLY against the per-render (randomized) correct letter — never
+      // the unshuffled canonical qObj.correct.
+      const correctLetter = QUIZ_RUNTIME_CORRECT[name];
+      if (displayedLetter && displayedLetter === correctLetter) {
         score++;
         paperScore++;
       }
 
-      // Convert the randomized displayed letter back to the stable original option.
+      // Convert the randomized displayed letter back to the stable original
+      // option text. Unanswered questions stay null — recomputed from the live
+      // DOM every call, so an already-answered response is never erased.
       let selectedAnswerText = null;
-
       if (displayedLetter) {
         const displayedIndex = ['A', 'B', 'C', 'D'].indexOf(displayedLetter);
         const originalOptionLetter =
@@ -4027,19 +4039,27 @@ function finishQuiz() {
         }
       }
 
-      // Keep the internal randomized-letter response if other code needs it.
+      // (1) Raw displayed-letter selection (existing behavior).
       DATA.responses[name] = displayedLetter;
 
-      // Save the analysis-ready stable answer content.
+      // (2) Stable, analysis-ready answer content used by the CSV export.
       DATA.responses[
         `quiz_${paperId}_q${qi + 1}_response`
       ] = selectedAnswerText;
     });
+    // (5) Current per-paper score for the assigned paper; others stay null.
     DATA.quiz_paper_scores[paperId] = paperScore;
   });
 
+  // (3) Number correct among all answers selected so far.
   DATA.quiz_score = score;
+  // (4) Full assigned quiz total (5 in the current one-paper design).
   DATA.quiz_total = total;
+}
+
+// Final submission reuses the shared logic — no second scoring/conversion copy.
+function finishQuiz() {
+  syncQuizProgress();
 }
 
 // ---------- Field collection ----------
@@ -4061,6 +4081,13 @@ function collectFieldsNow() {
     const checked = Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map(c => c.value);
     DATA.responses[name] = checked;
   });
+
+  // Defense-in-depth: after raw radio values are collected, convert the quiz
+  // selections into the stable analysis-ready fields + current score so EVERY
+  // autosave path (page navigation, 30s interval, pagehide/beacon, admin audit
+  // overlay, final submission) serializes current quiz progress. Only mutates
+  // DATA — never triggers autosave — so there is no recursion.
+  syncQuizProgress();
 }
 
 // ---------- Export / Admin ----------
@@ -4497,6 +4524,16 @@ function installAutosaveTriggers() {
     if (event.target.matches('textarea, input[type="text"], input[type="number"]')) saveProgressNow();
   }, true);
   document.addEventListener('change', (event) => {
+    // When a quiz answer changes, synchronize the stable quiz responses +
+    // current score into DATA BEFORE the autosave is scheduled, so the very
+    // next serialization already reflects this selection.
+    if (
+      event.target.matches('input[type="radio"]') &&
+      typeof event.target.name === 'string' &&
+      event.target.name.startsWith('quiz_')
+    ) {
+      syncQuizProgress();
+    }
     if (event.target.matches('input[type="radio"], input[type="checkbox"], input[type="range"], select')) scheduleAutosave();
   }, true);
   window.addEventListener('pagehide', () => saveProgressNow({ useBeacon: true }));

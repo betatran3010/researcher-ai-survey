@@ -127,14 +127,16 @@ test('every quiz question page is required (only the transition page is exempt)'
 });
 
 test('scoring compares against the randomized correct letter (0..N over the assigned paper)', () => {
-  const scoreFn = src.slice(src.indexOf('function finishQuiz()'), src.indexOf('function collectFieldsNow()'));
+  // Scoring/conversion lives in the shared syncQuizProgress() (finishQuiz now
+  // just delegates to it).
+  const scoreFn = src.slice(src.indexOf('function syncQuizProgress()'), src.indexOf('function finishQuiz()'));
   // Score is accumulated by comparing the displayed choice to the per-render
   // correct letter, so a reshuffled answer order still scores correctly.
   assert.ok(scoreFn.includes('QUIZ_RUNTIME_CORRECT[name]'));
   assert.ok(scoreFn.includes('displayedLetter === correctLetter'));
   // Scoring iterates the assigned paper's own quiz array, so the max equals
   // that paper's question count (5) and the min is 0.
-  assert.ok(scoreFn.includes('PAPERS[paperId].quiz.forEach'));
+  assert.ok(scoreFn.includes('paper.quiz.forEach'));
   assert.ok(scoreFn.includes('DATA.study_order.forEach'));
 });
 

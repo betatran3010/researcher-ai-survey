@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test:export": "node --test test/export.test.js test/admin-endpoints.test.js test/viewport.test.js test/viewport-export.test.js test/assignment.test.js test/assignment-balancing.test.js test/frontend-routing.test.js test/frontend-one-paper.test.js test/validation.test.js test/chat-response-length.test.js",
+    "test:export": "node --test test/export.test.js test/admin-endpoints.test.js test/viewport.test.js test/viewport-export.test.js test/assignment.test.js test/assignment-balancing.test.js test/frontend-routing.test.js test/frontend-one-paper.test.js test/validation.test.js test/chat-response-length.test.js test/quiz-autosave.test.js",
     "test:validation": "node --test test/validation.test.js",
     "reconcile:counters": "node scripts/reconcile-assignment-counters.js",
     "reconcile:counters:dry-run": "node scripts/reconcile-assignment-counters.js --dry-run"
