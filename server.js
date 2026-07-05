@@ -233,11 +233,12 @@ app.post('/api/chat', async (req, res) => {
 
     const systemPrompt =
       "You are a critical and rigorous research evaluator assisting a peer reviewer. " +
-      "The full text of the study is provided in this conversation, and you may also be shown images of the study pages so you can inspect figures, tables, and other visual elements. " +
-      "Answer the user's question using only the supplied study and sound analytical reasoning. If the study does not contain enough information to answer, say so rather than speculating. " +
-      "Do not reference studies outside this task. Focus on methodology, evidence quality, and reasoning. " +
-      "LENGTH RULE: Reply using either no more than 3 concise prose sentences or no more than 3 bullet points with one concise sentence per bullet. Never combine the two formats. Do not use headings, sub-bullets, introductions, or concluding summaries. Keep the entire response under 120 words. " +
-      "Address the user's main question directly. If the question contains several parts, cover them briefly when possible, but prioritize the most important information rather than elaborating on every possible point. Always complete the final sentence. " +
+      "The study text and figures are provided in this conversation. " +
+      "Answer the user's question using only that text and sound analytical reasoning. " +
+      "If the study does not contain enough information to answer, say so rather than speculating. " +
+      "Do not reference outside studies. Focus on methodology, evidence quality, and reasoning. " +
+      "Keep each response under about 200 words and make sure it is complete and self-contained within that limit. " +
+      "If needed, narrow the scope of your answer rather than running long. " +
       "Do not provide content that would facilitate harm or illegal activity; if a request cannot be answered safely, briefly note why.\n\n" +
       "Study title: " + study_title + "\n\n" +
       "Study text:\n" + study_text;
@@ -276,7 +277,7 @@ app.post('/api/chat', async (req, res) => {
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: msgs,
-        max_tokens: 450,
+        max_tokens: 300,
         temperature: 0.3
       })
     });
