@@ -10,7 +10,7 @@ function record(overrides={}) {
     research_role:"Master's student", research_expertise_stratum:'lower', ai_condition:'AI', critical_thinking_placement:'pre',
     assignment_cell:'AI_pre', study_1_id:'font', study_1_title:'Font paper', paper_order:['font'],
     responses:{font_strength:'A strength',font_limitation:'A limitation',font_improvement:'An improvement',font_understood:6,font_convincing:5,font_confidence:6,
-               quiz_font_q1_response:'A',quiz_font_q2_response:'B',quiz_font_q3_response:'C',quiz_font_q4_response:'D'},
+               quiz_font_q1_response:'A',quiz_font_q2_response:'B',quiz_font_q3_response:'C',quiz_font_q4_response:'D',quiz_font_q5_response:'E'},
     timing:{font:{duration_ms:120000,pdf_exposure_proportion_30s:0.5,region_exposed_30s_count:1,paper_navigation_sequence:'P1-Top-Half>P1-Bottom-Half',backward_transition_count:0,component_navigation_sequence:'Paper>Questions',component_transition_count:1}},
     ai_chats:{font:[{role:'user',content:'Prompt',ts:'2026-06-29T09:10:00Z'},{role:'assistant',content:'Reply',ts:'2026-06-29T09:10:01Z'}]},
     ai_message_log:[{paper_id:'font',success:true,prompt:'Prompt'}], ai_paper_aggregates:{font:{tab_opened:true,successful_messages:1}},
@@ -23,7 +23,7 @@ test('schema has generic one-paper columns, not three paper-prefixed sets', () =
   for (const col of ['strength_response','limitation_response','improvement_response',
                      'convincing_rating','confidence_rating','understanding_rating',
                      'strength_first_typing_time','limitation_first_typing_time','improvement_first_typing_time',
-                     'quiz_q1_response','quiz_q2_response','quiz_q3_response','quiz_q4_response','quiz_score']) {
+                     'quiz_q1_response','quiz_q2_response','quiz_q3_response','quiz_q4_response','quiz_q5_response','quiz_score']) {
     assert.ok(CSV_COLUMNS.includes(col), `missing ${col}`);
   }
   // No per-paper prefixed open-response copies
@@ -88,7 +88,28 @@ test('quiz responses and score are generic (not paper-prefixed)', () => {
   assert.equal(row.quiz_q2_response, 'B');
   assert.equal(row.quiz_q3_response, 'C');
   assert.equal(row.quiz_q4_response, 'D');
+  assert.equal(row.quiz_q5_response, 'E');
   assert.equal(row['quiz_font_q1_response'], undefined);
+  assert.equal(row['quiz_font_q5_response'], undefined);
+});
+
+test('quiz_q5_response is exported for the assigned paper and empty for unassigned papers', () => {
+  const assigned = flattenRecord(record());
+  assert.ok(CSV_COLUMNS.includes('quiz_q5_response'));
+  assert.equal(assigned.quiz_q5_response, 'E');
+  const other = flattenRecord(record({
+    study_1_id: 'food', study_1_title: 'Food paper', paper_order: ['food'],
+    responses: {
+      food_strength: 's', food_limitation: 'l', food_improvement: 'i',
+      food_understood: 5, food_convincing: 4, food_confidence: 5,
+      quiz_food_q1_response: 'W', quiz_food_q2_response: 'X',
+      quiz_food_q3_response: 'Y', quiz_food_q4_response: 'Z',
+      quiz_food_q5_response: 'Q'
+    },
+    quiz_score: 5, quiz_paper_scores: { food: 5 }
+  }));
+  assert.equal(other.quiz_q5_response, 'Q');
+  assert.equal(other.quiz_score, 5);
 });
 
 test('record provenance fields are exported', () => {

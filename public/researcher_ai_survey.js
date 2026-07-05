@@ -301,44 +301,53 @@ const STANDARD_Q_DEFS = [
 const PAPERS = {
   font: {
     id: 'font',
-    title: 'Generational Differences in Font-Based Credibility Judgments Across Everyday Contexts',
+    title: 'Typeface–Context Congruence and the Cohort-Dependent Basis of Font Credibility',
     pdfFile: 'papers/font.pdf',
     quiz: [
       {
-        q: 'Why did the researchers include three different serif/sans-serif font pairs?',
+        q: 'What pattern produced the cohort interaction in credibility ratings?',
         options: [
-          'A. To compare whether some font pairs produced stronger credibility judgments because they were easier to read',
-          'B. To determine whether the generational difference remained when the specific typefaces changed, rather than depending on one familiar font contrast',
-          'C. To ensure that each communicative context was presented in a different serif/sans-serif pair',
-          'D. To examine whether older and younger adults differed in their familiarity with the six individual typefaces'
-        ], correct: 'B'
-      },
-      {
-        q: 'What is the best description of how trustworthiness was measured in the study?',
-        options: [
-          'A. Participants rated the trustworthiness of each font version separately, and the two ratings were compared',
-          'B. Participants rated how well each typeface fit the context, which was used as an indirect measure of trust',
-          'C. Participants selected the more trustworthy version and then ranked all three font pairs',
-          'D. Participants chose which of two identically worded versions they found more trustworthy'
-        ], correct: 'D'
-      },
-      {
-        q: 'Which statement best describes the Generation × Scenario interaction?',
-        options: [
-          'A. Older adults showed their strongest serif preference in print-legacy contexts, whereas younger adults showed their clearest sans-serif preference in digitally native contexts',
-          'B. Older adults preferred serif typefaces more than younger adults across all four scenarios, and the size of this difference remained constant across contexts',
-          'C. Younger adults\' confidence ratings varied more across scenarios than older adults\' ratings did',
-          'D. The interaction was driven mainly by the bank security notice, which produced the largest generational difference'
+          'A. Both mismatch types reduced credibility for older adults, while mainly interpersonal mismatches did so for younger adults',
+          'B. Mainly institutional mismatches reduced credibility for older adults, while both mismatch types did so for younger adults',
+          'C. Both mismatch types reduced credibility for both cohorts, with a larger effect among younger adults',
+          'D. Mainly interpersonal mismatches reduced credibility for both cohorts, with a larger effect among older adults'
         ], correct: 'A'
       },
       {
-        q: 'What explanation do the authors propose for the study\'s results?',
+        q: 'Which measure was rated first, and why?',
         options: [
-          'A. Communication context determines which typeface category appears credible: serif fonts naturally fit formal contexts, whereas sans-serif fonts naturally fit digital contexts, regardless of the reader\'s background',
-          'B. Age-related differences in visual processing make serif fonts easier for older adults to interpret and sans-serif fonts easier for younger adults to interpret',
-          'C. Repeated exposure to a typeface category in particular communicative contexts builds familiarity with that pairing, so what feels credible depends on a person\'s exposure history',
-          'D. Individual typefaces possess relatively stable credibility cues, but different scenarios change how strongly readers attend to those cues'
+          'A. Credibility was rated first to reduce priming from the appropriateness judgment',
+          'B. Credibility was rated first to capture participants\' initial evaluation of the message',
+          'C. Appropriateness was rated first to anchor later credibility judgments to typeface fit',
+          'D. Appropriateness was rated first to separate style judgments from trust judgments'
+        ], correct: 'A'
+      },
+      {
+        q: 'Why did the study include three different exemplar families?',
+        options: [
+          'A. To compare whether some font pairs were easier to read',
+          'B. To ensure each participant saw several individual typefaces',
+          'C. To test whether the pattern generalized beyond one font contrast',
+          'D. To determine which font family participants preferred overall'
         ], correct: 'C'
+      },
+      {
+        q: 'How did younger adults respond to sans-serif institutional messages?',
+        options: [
+          'A. They judged them less appropriate but nearly as credible',
+          'B. They judged them more appropriate but less credible',
+          'C. They judged them low on both appropriateness and credibility',
+          'D. They judged them high on both appropriateness and credibility'
+        ], correct: 'A'
+      },
+      {
+        q: 'Which set of messages was used in the experiment?',
+        options: [
+          'A. A residential lease clause, a bank account-security notice, a note from a friend, and a message from a coworker',
+          'B. A news report, a medical consent form, a text from a family member, and a workplace announcement',
+          'C. A rental advertisement, a credit-card offer, a social-media post, and an email from a supervisor',
+          'D. A legal warning, an insurance notice, a personal invitation, and an online product review'
+        ], correct: 'A'
       }
     ]
   },
@@ -348,40 +357,49 @@ const PAPERS = {
     pdfFile: 'papers/food.pdf',
     quiz: [
       {
-        q: 'Why did the researchers use a within-subjects crossover design, with each participant eating both lunches on separate days?',
+        q: 'Which feature of the glucose curves most clearly distinguished the two lunches after their peaks?',
         options: [
-          'A. To compare each participant\'s responses across lunches while reducing the influence of stable metabolic differences between individuals',
-          'B. To isolate processing level by ensuring that the two lunches were identical in every respect except how they were prepared',
-          'C. To test whether eating one lunch changed participants\' metabolic response to the lunch served at the later visit',
-          'D. To increase the effective sample size by treating the two visits as independent observations from different participants'
+          'A. The minimally processed curve stayed below baseline for most of the afternoon',
+          'B. The ultra-processed curve fell below baseline for a longer period',
+          'C. Both curves returned to baseline at approximately the same time',
+          'D. Both curves remained above baseline until the final measurement'
+        ], correct: 'B'
+      },
+      {
+        q: 'Why did the glucose measurements provide more information about the response over time?',
+        options: [
+          'A. Glucose was measured repeatedly, while insulin and triglycerides had one post-lunch measurement',
+          'B. Glucose was measured after both lunches, while insulin and triglycerides were measured after only one lunch',
+          'C. Glucose was measured with a wearable sensor, while insulin and triglycerides came from self-reports',
+          'D. Glucose was measured across the afternoon, while insulin and triglycerides were measured only before lunch'
         ], correct: 'A'
       },
       {
-        q: 'Why did the researchers use two blood draws rather than repeated blood sampling across the entire visit?',
+        q: 'How did self-reported hunger compare with later snack intake?',
         options: [
-          'A. Because the continuous glucose monitor captured the full metabolic response, making later insulin and triglyceride measurements unnecessary',
-          'B. Because insulin and triglycerides were expected to remain relatively stable after the 60-minute measurement',
-          'C. To ensure that collecting blood did not affect how much participants later ate from the snack tray',
-          'D. To limit the burden of repeated blood draws while still measuring insulin and triglycerides at a time when post-meal responses typically peak'
-        ], correct: 'D'
-      },
-      {
-        q: 'What did the correlation between the post-lunch glucose dip and snack intake suggest?',
-        options: [
-          'A. Larger glucose drops were associated with greater snack intake, indicating that the glucose dip fully accounted for the lunch-condition difference in later eating',
-          'B. Larger glucose drops were associated with greater snack intake only after the ultra-processed lunch, indicating that the relationship did not occur in the other condition',
-          'C. Larger glucose drops were associated with greater snack intake, but the correlation alone could not establish that the glucose dip caused participants to eat more',
-          'D. Larger glucose drops predicted greater snack intake even after differences in taste and texture were controlled statistically'
-        ], correct: 'C'
-      },
-      {
-        q: 'What mechanism do the authors propose linking food processing to the different metabolic responses?',
-        options: [
-          'A. Greater processing makes food easier to break down and absorb, which may produce a sharper glucose rise, a larger insulin response, and a later decline',
-          'B. Ultra-processed foods contain more metabolizable calories than their labels report, even when labeled calories and macronutrients are matched',
-          'C. Additives in ultra-processed foods directly impair insulin signaling, causing glucose to remain elevated throughout the observation period',
-          'D. Minimally processed foods require more chewing, and the slower eating rate accounts for the observed glucose and insulin differences'
+          'A. Participants reported similar hunger but ate different amounts from the snack tray',
+          'B. Participants reported different hunger but ate similar amounts from the snack tray',
+          'C. Participants reported greater hunger and ate more after the minimally processed meal',
+          'D. Participants reported less hunger and ate less after the ultra-processed meal'
         ], correct: 'A'
+      },
+      {
+        q: 'Which comparison is best supported by the study design?',
+        options: [
+          'A. The short-term responses to two different meal patterns in the same participants',
+          'B. The long-term health effects of regularly eating either meal pattern',
+          'C. The independent causal effect of processing while all other meal features are fixed',
+          'D. The responses of people with diabetes compared with people without diabetes'
+        ], correct: 'A'
+      },
+      {
+        q: 'Which account was better supported by the study\'s findings?',
+        options: [
+          'A. The energy-equivalence account',
+          'B. The food-structure account',
+          'C. The hunger-compensation account',
+          'D. The calorie-mismeasurement account'
+        ], correct: 'B'
       }
     ]
   },
@@ -391,40 +409,49 @@ const PAPERS = {
     pdfFile: 'papers/listing.pdf',
     quiz: [
       {
-        q: 'What did the researchers use as an external benchmark to assess whether audit-coded mismatch scores or star ratings reflected real-world listing problems?',
+        q: 'What could the study not determine?',
         options: [
-          'A. Each listing\'s overall return rate, which combined returns due to inaccurate descriptions with returns for fit, preference, damage, and other reasons',
-          'B. The proportion of written reviews that mentioned discrepancies between the listing and the delivered product',
-          'C. Each listing\'s trailing 90-day item-not-as-described return rate, which recorded returns attributed specifically to the product not matching its listing',
-          'D. The number of customer complaints or policy reports submitted against the seller during the preceding 90 days'
-        ], correct: 'C'
-      },
-      {
-        q: 'How did the researchers sample products across the three seller types within each product category?',
-        options: [
-          'A. They sampled seller types in proportion to their share of listings on the marketplace',
-          'B. They sampled the same number of products from each seller type within every category',
-          'C. They sampled more seller-shipped third-party listings in categories expected to have higher mismatch rates',
-          'D. They sampled products from only one seller type within each category'
+          'A. Whether different categories tended to involve different types of inaccurate claims',
+          'B. How much discrepancy buyers would tolerate before judging a product unacceptable',
+          'C. Whether mismatch rates differed across seller types',
+          'D. Whether audit-coded mismatch scores predicted item-not-as-described returns'
         ], correct: 'B'
       },
       {
-        q: 'Which conclusion is best supported by the category-specific mismatch results?',
+        q: 'Which procedure did the researchers use to classify listing accuracy?',
         options: [
-          'A. Product categories differed mainly in how often mismatches occurred, while the types of claims that failed were broadly similar across categories',
-          'B. Product categories differed both in their overall mismatch rates and in the kinds of listing claims that were most often inaccurate',
-          'C. Differences between product categories were primarily caused by unequal representation of the three seller types',
-          'D. Categories with more easily measurable physical features, such as dimensions or capacity, consistently showed the highest mismatch rates'
+          'A. Blinded coders compared each delivered product with category standards and assigned an overall accuracy judgment',
+          'B. Blinded coders checked each delivered product against its applicable listing claims, and any failed claim counted as a mismatch',
+          'C. Researchers combined star ratings and item-not-as-described returns to identify listings likely to contain inaccurate claims',
+          'D. Researchers classified products as mismatched only when both blinded coders identified failures in multiple claim types'
         ], correct: 'B'
       },
       {
-        q: 'Why might star ratings fail to closely track objective listing accuracy, according to the authors?',
+        q: 'What did examining four product categories allow the researchers to compare?',
         options: [
-          'A. Star ratings are calculated across all products sold by the same seller, whereas mismatch scores were calculated for individual listings',
-          'B. Star ratings are based primarily on whether a product was returned, whereas mismatch scores were based on direct inspection',
-          'C. Star ratings place greater weight on recent reviews, whereas mismatch scores weighted every audited claim equally',
-          'D. Star ratings combine listing accuracy with other aspects of the purchase, such as shipping, customer service, packaging, and price satisfaction'
+          'A. Whether listing mismatch rates and types differed across kinds of products',
+          'B. Whether listing star ratings were equally reliable in every category',
+          'C. Whether each seller type performed best in a different category',
+          'D. Whether item-not-as-described returns were concentrated in one category'
+        ], correct: 'A'
+      },
+      {
+        q: 'Why do the authors argue that star ratings may not closely track item-not-as-described returns?',
+        options: [
+          'A. Ratings may combine reviews from product variants with different features or specifications',
+          'B. Ratings may remain attached after a seller changes the listing or replaces the product',
+          'C. Ratings may overrepresent buyers who had unusually positive or negative experiences',
+          'D. Ratings reflect overall purchase satisfaction rather than listing accuracy alone'
         ], correct: 'D'
+      },
+      {
+        q: 'Which description best matches the mismatch-rate results?',
+        options: [
+          'A. Platform-sold listings were lowest and seller-shipped listings highest in every category; skincare and phone chargers had the highest overall rates',
+          'B. Fulfilled-by-platform listings were lowest and platform-sold listings highest in every category; clothing and storage goods had the highest overall rates',
+          'C. Seller-shipped listings were highest only for skincare and phone chargers; platform-sold listings were highest for clothing and storage goods',
+          'D. Seller-type rankings varied across categories; clothing had the highest overall rate and skincare had the lowest'
+        ], correct: 'A'
       }
     ]
   }
@@ -1147,9 +1174,9 @@ function flagGroupError(container) {
 }
 // Minimum word count required for each written evaluation response
 // (strengths / limitations / improvements).
-const MIN_RESPONSE_WORDS = 75;
+const MIN_RESPONSE_WORDS = 50;
 const SHORT_RESPONSE_ALERT =
-  'Please add more detail. Your response should be at least 75 words and explain the specific feature and why it matters.';
+  'Please add more detail. Your response should be at least 50 words and explain the specific feature and why it matters.';
 
 // Counts words in a response: trims, treats any whitespace run (spaces or line
 // breaks) as a single separator, and returns 0 for blank text.
@@ -1745,7 +1772,7 @@ const INSTRUCTIONS_PAGES_COMMON = [
   },
   {
     paragraphs: [
-      'Please provide enough detail to fully explain your reasoning. As a guide, each response should be about [[B]]75 words or more (around 5 sentences) [[/B]].'
+      'Please provide enough detail to fully explain your reasoning. As a guide, each response should be about [[B]]50 words or more (around 3 sentences) [[/B]].'
     ]
   },
   {
@@ -2116,6 +2143,10 @@ async function renderPDF(url, containerId, paperId) {
   try {
     const pdf = await pdfjsLib.getDocument(url).promise;
     container.innerHTML = '';
+    // Accumulates downscaled page images for the AI vision context. Declared
+    // before the page-rendering loop so a capture failure (handled per-page
+    // below) never leaves this undefined and never aborts PDF rendering.
+    const capturedImages = [];
     const browserPixelRatio = window.devicePixelRatio || 1;
     const renderPixelRatio = Math.min(
       3,
@@ -3865,7 +3896,7 @@ document.addEventListener('change', (e) => {
 // ---------- Quiz ----------
 // Renders one page per comprehension-quiz question, plus a short transition
 // page before each paper's block of questions ("You will first/Next answer
-// four questions about: <title>") so participants can tell which paper a
+// five questions about: <title>") so participants can tell which paper a
 // question belongs to and when the quiz moves to the second paper. The
 // transition page auto-advances after 3s (see showPage()/quizTransitionTimer)
 // rather than using the Continue button. DATA.study_order holds the two
@@ -3890,7 +3921,7 @@ function shuffleArray(arr) {
 }
 
 // Per spec section 9 ("make sure we randomize the question and answer
-// option orders"): for each paper, both the order the four quiz questions
+// option orders"): for each paper, both the order the five quiz questions
 // are shown in, and the order each question's four answer options are
 // shown in, are randomized once per participant. Quiz pages are only ever
 // built once per session (guarded by QUIZ_PAGE_IDS.length === 0 at the
@@ -3911,8 +3942,8 @@ function buildQuizPages() {
     const transitionId = 'page-quiz-transition-' + paperId;
     QUIZ_PAGE_IDS.push(transitionId);
     const transitionLead = paperIdx === 0
-      ? 'You will first answer four questions about:'
-      : 'Next, you will answer four questions about:';
+      ? 'You will first answer five questions about:'
+      : 'Next, you will answer five questions about:';
     html += `<div class="page quiz-transition-page" id="${transitionId}">
       <div class="quiz-transition-inner">
         <p class="quiz-transition-lead">${escapeHtml(transitionLead)}</p>
