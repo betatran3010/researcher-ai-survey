@@ -159,24 +159,6 @@ function isValidImageDataUrl(v) {
     /^data:image\/(jpeg|jpg|png);base64,/.test(v);
 }
 
-function countWords(text) {
-  return text.trim().split(/\s+/).filter(Boolean).length;
-}
-
-function hasShortListPoint(text) {
-  const points = text
-    .split(/\n\s*\n/)
-    .map(point => point.trim())
-    .filter(Boolean);
-
-  if (points.length < 2) return false;
-
-  return points.some(point => {
-    const withoutLabel = point.replace(/^[^:\n]{1,100}:\s*/, '');
-    return countWords(withoutLabel) < 50;
-  });
-}
-
 // ---------- POST /api/chat ----------
 app.post('/api/chat', async (req, res) => {
   try {
@@ -252,32 +234,16 @@ app.post('/api/chat', async (req, res) => {
     const systemPrompt =
       "You are a critical and rigorous research evaluator assisting a peer reviewer. " +
       "The study text and figures are provided in this conversation. " +
-      "Answer the user's question using only that text and sound analytical reasoning. " +
+      "Answer the user's question using only the supplied study and sound analytical reasoning. " +
       "If the study does not contain enough information to answer, say so rather than speculating. " +
       "Do not reference outside studies. Focus on methodology, evidence quality, and reasoning. " +
       "Answer directly without prefacing the response with phrases such as 'Here is your answer,' 'Certainly,' or similar introductory language. " +
-      "LENGTH AND FORMAT RULE: Answer directly and concisely, but provide enough detail for the response to be useful on its own. " +
-      "Follow the user's requested number of points, format, or approximate word length when one is provided. " +
-      "For example, if the user asks for one strength in about 50 words, provide one sufficiently developed strength of approximately 50–60 words. " +
-      "If the user does not specify a format, length, or number of points, choose the format that best fits the question and aim for a complete response of approximately 180–220 words. " +
-      "For questions that ask for multiple strengths, limitations, improvements, follow-up studies, or other distinct points, use a numbered or bulleted list. " +
-      "Each list point must contain at least 50 words, excluding its short label, and must be developed in at least 3 complete sentences. " +
-      "Before responding, check that every list point meets the 50-word minimum. Add substantive explanation rather than filler. " +
-      "For questions that ask for an overall interpretation, explanation, comparison, or judgment, use a developed paragraph unless a list would make the answer clearer. " +
-      "Do not include a heading, introduction, or concluding summary. " +
-      "Avoid overlapping points, unsupported labels, sentence fragments, or repetitive explanations. " +
-      "If the question contains several parts, address each part briefly when possible. Always complete the final sentence. " +
-      "If needed, narrow the scope of your answer rather than running long. " +
+      "Keep the entire response under 100 words and make sure it is complete and self-contained within that limit. " +
+      "If needed, narrow the scope of your answer rather than running long." +
+      "Follow the user's requested number of points, format, or approximate length when one is provided. " +
       "Do not provide content that would facilitate harm or illegal activity; if a request cannot be answered safely, briefly note why.\n\n" +
       "Study title: " + study_title + "\n\n" +
       "Study text:\n" + study_text;
-
-    const retryPrompt =
-      "Revise the response so that every numbered or bulleted point contains at least 50 words, excluding its short label, and at least 3 complete sentences. " +
-      "Keep the same main points, but add substantive methodological or evidentiary explanation where needed rather than filler or repetition. " +
-      "Keep the response focused, complete, and under 200 words. " +
-      "Do not add a heading, introduction, or concluding summary. " +
-      "Return only the revised response.";
 
     const messages = [{ role: 'system', content: systemPrompt }];
     conversation_history.forEach(turn => {
@@ -301,7 +267,7 @@ app.post('/api/chat', async (req, res) => {
 
     // Single source of truth for the OpenAI Chat Completions call, used
     // identically for the initial request and the silent length-retry below.
-    // max_tokens (400) is a guardrail, not the length control — the LENGTH
+    // max_tokens (200) is a guardrail, not the length control — the LENGTH
     // RULE in the system prompt keeps replies well under it. Model and
     // temperature are unchanged and identical across both calls.
     const callOpenAI = (msgs) => fetch('https://api.openai.com/v1/chat/completions', {
@@ -313,7 +279,7 @@ app.post('/api/chat', async (req, res) => {
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: msgs,
-        max_tokens: 400,
+        max_tokens: 200,
         temperature: 0.3
       })
     });
@@ -329,74 +295,6 @@ app.post('/api/chat', async (req, res) => {
     const data = await openaiResponse.json();
     const choice = data?.choices?.[0];
     let reply = choice?.message?.content;
-    const finishReason = choice?.finish_reason;
-    if (!reply) {
-      console.error('[api/chat] OpenAI response missing content', JSON.stringify(data));
-      return res.status(502).json({ error: 'The AI assistant could not respond right now. Please try again.' });
-    }
-
-    // If the model hit the token guardrail, the reply may be cut off
-    // mid-thought. Handle this SILENTLY and server-side only: participants
-    // never see any truncation notice, banner, retry, or finish_reason — only
-    // a normal final reply. Make ONE retry that asks for a shorter, complete
-    // rewrite. The retry is NOT a new participant message and advances no
-    // turn counter (conversation_history is untouched).
-    const needsRetry =
-      finishReason === 'length' ||
-      hasShortListPoint(reply);
-
-    if (needsRetry) {
-      console.warn('[api/chat] reply needs revision; retrying silently', {
-        participant_id,
-        paper_id,
-        finishReason
-      });
-
-      const retryMessages = messages.concat([
-        { role: 'assistant', content: reply },
-        { role: 'user', content: retryPrompt }
-      ]);
-
-      try {
-        const retryResponse = await callOpenAI(retryMessages);
-
-        if (!retryResponse.ok) {
-          const retryErrText = await retryResponse.text().catch(() => '');
-          console.error(
-            '[api/chat] silent retry OpenAI API error',
-            retryResponse.status,
-            retryErrText
-          );
-
-          return res.status(502).json({
-            error: 'The AI assistant could not respond right now. Please try again.'
-          });
-        }
-
-        const retryData = await retryResponse.json();
-        const retryChoice = retryData?.choices?.[0];
-        const retryReply = retryChoice?.message?.content;
-
-        if (!retryReply || retryChoice?.finish_reason === 'length') {
-          console.error(
-            '[api/chat] silent retry did not yield a complete reply',
-            JSON.stringify(retryData)
-          );
-
-          return res.status(502).json({
-            error: 'The AI assistant could not respond right now. Please try again.'
-          });
-        }
-
-        reply = retryReply;
-      } catch (retryErr) {
-        console.error('[api/chat] silent retry threw', retryErr);
-
-        return res.status(502).json({
-          error: 'The AI assistant could not respond right now. Please try again.'
-        });
-      }
-    }
 
     // Server-side log (participant_id, paper_id, condition, turn count) — no API key, no provider error details to client.
     console.log('[api/chat]', { participant_id, condition, paper_id, turn: conversation_history.length + 1 });
