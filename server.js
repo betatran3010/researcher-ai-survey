@@ -245,6 +245,11 @@ app.post('/api/chat', async (req, res) => {
       "Study title: " + study_title + "\n\n" +
       "Study text:\n" + study_text;
 
+    const retryPrompt =
+      "Rewrite the answer as a complete response under 100 words. " +
+      "Preserve the most important information, answer the user's question directly, and complete every sentence. " +
+      "Return only the revised response.";
+
     const messages = [{ role: 'system', content: systemPrompt }];
     conversation_history.forEach(turn => {
       const role = turn.role === 'assistant' ? 'assistant' : 'user';
@@ -267,7 +272,7 @@ app.post('/api/chat', async (req, res) => {
 
     // Single source of truth for the OpenAI Chat Completions call, used
     // identically for the initial request and the silent length-retry below.
-    // max_tokens (200) is a guardrail, not the length control — the LENGTH
+    // max_tokens (250) is a guardrail, not the length control — the LENGTH
     // RULE in the system prompt keeps replies well under it. Model and
     // temperature are unchanged and identical across both calls.
     const callOpenAI = (msgs) => fetch('https://api.openai.com/v1/chat/completions', {
@@ -279,7 +284,7 @@ app.post('/api/chat', async (req, res) => {
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: msgs,
-        max_tokens: 200,
+        max_tokens: 250,
         temperature: 0.3
       })
     });
@@ -295,6 +300,53 @@ app.post('/api/chat', async (req, res) => {
     const data = await openaiResponse.json();
     const choice = data?.choices?.[0];
     let reply = choice?.message?.content;
+    const finishReason = choice?.finish_reason;
+
+    if (!reply) {
+      console.error('[api/chat] OpenAI response missing content', JSON.stringify(data));
+      return res.status(502).json({
+        error: 'The AI assistant could not respond right now. Please try again.'
+      });
+    }
+
+    if (finishReason === 'length') {
+      const retryMessages = messages.concat([
+        { role: 'assistant', content: reply },
+        { role: 'user', content: retryPrompt }
+      ]);
+
+      const retryResponse = await callOpenAI(retryMessages);
+
+      if (!retryResponse.ok) {
+        const retryErrText = await retryResponse.text().catch(() => '');
+        console.error(
+          '[api/chat] silent retry OpenAI API error',
+          retryResponse.status,
+          retryErrText
+        );
+
+        return res.status(502).json({
+          error: 'The AI assistant could not respond right now. Please try again.'
+        });
+      }
+
+      const retryData = await retryResponse.json();
+      const retryChoice = retryData?.choices?.[0];
+      const retryReply = retryChoice?.message?.content;
+
+      if (!retryReply || retryChoice?.finish_reason === 'length') {
+        console.error(
+          '[api/chat] silent retry did not yield a complete reply',
+          JSON.stringify(retryData)
+        );
+
+        return res.status(502).json({
+          error: 'The AI assistant could not respond right now. Please try again.'
+        });
+      }
+
+      reply = retryReply;
+    }
 
     // Server-side log (participant_id, paper_id, condition, turn count) — no API key, no provider error details to client.
     console.log('[api/chat]', { participant_id, condition, paper_id, turn: conversation_history.length + 1 });
