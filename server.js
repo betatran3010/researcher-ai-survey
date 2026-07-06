@@ -145,7 +145,7 @@ const MAX_STUDY_TEXT_LEN = 60000;
 const MAX_HISTORY_TURNS = 40;
 const MAX_HISTORY_MSG_LEN = 4000;
 const MAX_VISION_IMAGES = 8; // matches MAX_AI_VISION_PAGES in the frontend
-const MAX_USER_TURNS_PER_PAPER = 5; // matches MAX_AI_MESSAGES_PER_PAPER in the frontend
+const MAX_USER_TURNS_PER_PAPER = 6; // matches MAX_AI_MESSAGES_PER_PAPER in the frontend
 const MAX_IMAGE_DATA_URL_LEN = 1500000; // ~1.5MB per data URL, generous for a downscaled JPEG
 
 function isNonEmptyString(v) {

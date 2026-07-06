@@ -1826,7 +1826,7 @@ const INSTRUCTIONS_PAGES_AI_ONLY = [
   },
   {
     paragraphs: [
-      'You may send up to [[FIVE]] queries to the AI assistant for the study. The number of messages remaining will be displayed in the AI Assistant tab. You will receive the [[SAME]] compensation regardless of how much you use AI.'
+      'You may send up to [[B]]6 queries[[/B]] to the AI assistant for the study. The number of messages remaining will be displayed in the AI Assistant tab. You will receive the [[SAME]] compensation regardless of how much you use AI.'
     ]
   }
 ];
@@ -1907,7 +1907,7 @@ const INSTRUCTIONS_MOCKUP_SVG_NOAI = `<svg viewBox="0 0 560 280" xmlns="http://w
 // existing buildQuizPages() pattern (dynamic sub-pages inserted into
 // pageOrder) used for the comprehension quiz.
 // Renders [[B]]...[[/B]] spans in instruction text as bold, matching the
-// existing [[FIVE]]/[[SAME]] bold-token convention. Input is already escaped.
+// existing [[SIX]]/[[SAME]] bold-token convention. Input is already escaped.
 function applyBold(html) {
   return String(html == null ? '' : html)
     .replace(/\[\[B\]\]([\s\S]*?)\[\[\/B\]\]/g, '<strong>$1</strong>');
@@ -1957,7 +1957,6 @@ function buildInstructionsPages() {
     const paraHtml = paragraphs
       .map(text => {
         const safeText = applyBold(escapeHtml(text))
-          .replace(/\[\[FIVE\]\]/g, '<strong>FIVE</strong>')
           .replace(/\[\[SAME\]\]/g, '<strong>SAME</strong>');
 
         return `
@@ -2859,7 +2858,7 @@ function switchWorkspaceTab(paperId, tab) {
   }
 }
 
-const MAX_AI_MESSAGES_PER_PAPER = 5;
+const MAX_AI_MESSAGES_PER_PAPER = 6;
 
 function getAiAggregate(paperId) {
   // DATA.ai_paper_aggregates pre-populates each pool paper as an empty {}
@@ -2867,7 +2866,7 @@ function getAiAggregate(paperId) {
   // "if (!DATA.ai_paper_aggregates[paperId])" guard never actually fills in
   // the default fields, leaving successful_messages as undefined. That
   // turned "remaining = MAX - successful_messages" into NaN, which made the
-  // UI report the 5-message limit as already reached on first load. Always
+  // UI report the 6-message limit as already reached on first load. Always
   // merge in any missing default fields instead of only checking truthiness.
   const existing = DATA.ai_paper_aggregates[paperId];
   if (!existing || typeof existing.successful_messages !== 'number') {
@@ -2895,7 +2894,7 @@ function updateAiRemainingUI(paperId) {
   const note = document.getElementById('aiRemaining-' + paperId);
   if (note) note.textContent = remaining > 0
     ? remaining + ' of ' + MAX_AI_MESSAGES_PER_PAPER + ' messages remaining'
-    : 'You have reached the 5-message limit for this paper.';
+    : 'You have reached the 6-message limit for this paper.';
   const input = document.getElementById('aiInput-' + paperId);
   const sendBtn = document.getElementById('aiSendBtn-' + paperId);
   const limitReached = remaining <= 0;
@@ -3002,7 +3001,7 @@ async function callBackendChat(paperId, userMessage, priorHistory) {
       // send the current message to the model twice (once here, once via
       // user_message below) and (b) make the server's re-derived per-paper
       // message count include the very message currently being sent, off-by-
-      // one-ing the 5-message cap so it always blocks on the 5th message.
+      // one-ing the 6-message cap so it always blocks on the 6th message.
       conversation_history: priorHistory
     })
   });
@@ -3026,7 +3025,7 @@ function handleAIInputKeydown(e, paperId) {
 async function sendAIMessage(paperId) {
   if (aiSendInFlight[paperId]) return; // prevent duplicate requests (Send click or repeated Enter)
   const agg = getAiAggregate(paperId);
-  if (agg.successful_messages >= MAX_AI_MESSAGES_PER_PAPER) return; // 5-message cap reached; input should already be disabled
+  if (agg.successful_messages >= MAX_AI_MESSAGES_PER_PAPER) return; // 6-message cap reached; input should already be disabled
   const input = document.getElementById('aiInput-' + paperId);
   const sendBtn = document.getElementById('aiSendBtn-' + paperId);
   const messagesContainer = document.getElementById('aiMessages-' + paperId);
@@ -3044,7 +3043,7 @@ async function sendAIMessage(paperId) {
   // precisely identified and rolled back below if this attempt fails. A
   // failed turn must NEVER remain in DATA.ai_chats: this array is sent back
   // to the server as conversation_history on the next request, and the
-  // server independently re-derives the 5-message-per-paper cap by counting
+  // server independently re-derives the 6-message-per-paper cap by counting
   // 'user' turns in that history. If a failed attempt were left in here, it
   // would permanently inflate the server's count without ever consuming a
   // slot the client's own successful_messages-based "remaining" UI shows —
@@ -3093,7 +3092,7 @@ async function sendAIMessage(paperId) {
     if (idx !== -1) DATA.ai_chats[paperId].splice(idx, 1);
   } finally {
     const sendEndTs = nowTs();
-    // Only successful submissions count against the 5-message cap, per spec.
+    // Only successful submissions count against the 6-message cap, per spec.
     if (success) agg.successful_messages++;
     DATA.ai_message_log.push({
       participant_id: DATA.participant_id,
