@@ -159,6 +159,24 @@ function isValidImageDataUrl(v) {
     /^data:image\/(jpeg|jpg|png);base64,/.test(v);
 }
 
+function countWords(text) {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function hasShortListPoint(text) {
+  const points = text
+    .split(/\n\s*\n/)
+    .map(point => point.trim())
+    .filter(Boolean);
+
+  if (points.length < 2) return false;
+
+  return points.some(point => {
+    const withoutLabel = point.replace(/^[^:\n]{1,100}:\s*/, '');
+    return countWords(withoutLabel) < 50;
+  });
+}
+
 // ---------- POST /api/chat ----------
 app.post('/api/chat', async (req, res) => {
   try {
@@ -241,8 +259,10 @@ app.post('/api/chat', async (req, res) => {
       "LENGTH AND FORMAT RULE: Answer directly and concisely, but provide enough detail for the response to be useful on its own. " +
       "Follow the user's requested number of points, format, or approximate word length when one is provided. " +
       "For example, if the user asks for one strength in about 50 words, provide one sufficiently developed strength of approximately 50–60 words. " +
-      "If the user does not specify a format, length, or number of points, choose the format that best fits the question and aim for a complete response of approximately 180–200 words. " +
-      "For questions that ask for multiple strengths, limitations, improvements, follow-up studies, or other distinct points, use a numbered or bulleted list. Develop each point in at least 3 complete sentences and approximately 50–65 words so that it can stand on its own. " +
+      "If the user does not specify a format, length, or number of points, choose the format that best fits the question and aim for a complete response of approximately 180–220 words. " +
+      "For questions that ask for multiple strengths, limitations, improvements, follow-up studies, or other distinct points, use a numbered or bulleted list. " +
+      "Each list point must contain at least 50 words, excluding its short label, and must be developed in at least 3 complete sentences. " +
+      "Before responding, check that every list point meets the 50-word minimum. Add substantive explanation rather than filler. " +
       "For questions that ask for an overall interpretation, explanation, comparison, or judgment, use a developed paragraph unless a list would make the answer clearer. " +
       "Do not include a heading, introduction, or concluding summary. " +
       "Avoid overlapping points, unsupported labels, sentence fragments, or repetitive explanations. " +
@@ -251,6 +271,13 @@ app.post('/api/chat', async (req, res) => {
       "Do not provide content that would facilitate harm or illegal activity; if a request cannot be answered safely, briefly note why.\n\n" +
       "Study title: " + study_title + "\n\n" +
       "Study text:\n" + study_text;
+
+    const retryPrompt =
+      "Revise the response so that every numbered or bulleted point contains at least 50 words, excluding its short label, and at least 3 complete sentences. " +
+      "Keep the same main points, but add substantive methodological or evidentiary explanation where needed rather than filler or repetition. " +
+      "Keep the response focused, complete, and under 200 words. " +
+      "Do not add a heading, introduction, or concluding summary. " +
+      "Return only the revised response.";
 
     const messages = [{ role: 'system', content: systemPrompt }];
     conversation_history.forEach(turn => {
@@ -274,7 +301,7 @@ app.post('/api/chat', async (req, res) => {
 
     // Single source of truth for the OpenAI Chat Completions call, used
     // identically for the initial request and the silent length-retry below.
-    // max_tokens (350) is a guardrail, not the length control — the LENGTH
+    // max_tokens (400) is a guardrail, not the length control — the LENGTH
     // RULE in the system prompt keeps replies well under it. Model and
     // temperature are unchanged and identical across both calls.
     const callOpenAI = (msgs) => fetch('https://api.openai.com/v1/chat/completions', {
@@ -314,35 +341,60 @@ app.post('/api/chat', async (req, res) => {
     // a normal final reply. Make ONE retry that asks for a shorter, complete
     // rewrite. The retry is NOT a new participant message and advances no
     // turn counter (conversation_history is untouched).
-    if (finishReason === 'length') {
-      console.warn('[api/chat] reply truncated by token limit; retrying silently', { participant_id, paper_id });
+    const needsRetry =
+      finishReason === 'length' ||
+      hasShortListPoint(reply);
 
-      // Fresh messages array (the original is never mutated) with a one-off
-      // rewrite instruction appended.
-      const retryMessages = messages.concat([{
-        role: 'user',
-        content: 'Rewrite the answer as a complete response under 90 words. Use at most 3 concise sentences or 3 bullet points with one concise sentence per bullet. Do not include an introduction, heading, sub-bullets, or conclusion. Preserve the most important content and finish every sentence.'
-      }]);
+    if (needsRetry) {
+      console.warn('[api/chat] reply needs revision; retrying silently', {
+        participant_id,
+        paper_id,
+        finishReason
+      });
+
+      const retryMessages = messages.concat([
+        { role: 'assistant', content: reply },
+        { role: 'user', content: retryPrompt }
+      ]);
 
       try {
         const retryResponse = await callOpenAI(retryMessages);
+
         if (!retryResponse.ok) {
           const retryErrText = await retryResponse.text().catch(() => '');
-          console.error('[api/chat] silent retry OpenAI API error', retryResponse.status, retryErrText);
-          return res.status(502).json({ error: 'The AI assistant could not respond right now. Please try again.' });
+          console.error(
+            '[api/chat] silent retry OpenAI API error',
+            retryResponse.status,
+            retryErrText
+          );
+
+          return res.status(502).json({
+            error: 'The AI assistant could not respond right now. Please try again.'
+          });
         }
+
         const retryData = await retryResponse.json();
         const retryChoice = retryData?.choices?.[0];
         const retryReply = retryChoice?.message?.content;
-        // Only accept a retry that is both present AND complete.
+
         if (!retryReply || retryChoice?.finish_reason === 'length') {
-          console.error('[api/chat] silent retry did not yield a complete reply', JSON.stringify(retryData));
-          return res.status(502).json({ error: 'The AI assistant could not respond right now. Please try again.' });
+          console.error(
+            '[api/chat] silent retry did not yield a complete reply',
+            JSON.stringify(retryData)
+          );
+
+          return res.status(502).json({
+            error: 'The AI assistant could not respond right now. Please try again.'
+          });
         }
+
         reply = retryReply;
       } catch (retryErr) {
         console.error('[api/chat] silent retry threw', retryErr);
-        return res.status(502).json({ error: 'The AI assistant could not respond right now. Please try again.' });
+
+        return res.status(502).json({
+          error: 'The AI assistant could not respond right now. Please try again.'
+        });
       }
     }
 
