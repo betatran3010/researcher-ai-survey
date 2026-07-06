@@ -240,10 +240,10 @@ app.post('/api/chat', async (req, res) => {
       "Answer directly without prefacing the response with phrases such as 'Here is your answer,' 'Certainly,' or similar introductory language. " +
       "LENGTH AND FORMAT RULE: Answer directly and concisely, but provide enough detail for the response to be useful on its own. " +
       "Follow the user's requested number of points, format, or approximate word length when one is provided. " +
-      "For example, if the user asks for one strength in about 50 words, provide one sufficiently developed strength of approximately that length. " +
-      "If the user does not specify a format or length, provide a complete response of about 135–145 words and never exceed 150 words. " +
-      "By default, organize the response as a numbered list of 3–4 distinct points. " +
-      "Begin each point with a short bolded label followed by a colon, then explain the point in approximately 50 words. " +
+      "For example, if the user asks for one strength in about 50 words, provide one sufficiently developed strength of approximately 50 words. " +
+      "If the user does not specify a format, length, or number of points, choose the format that best fits the question and aim for a complete response of approximately 150 words. " +
+      "For questions that ask the user to identify multiple strengths, limitations, improvements, follow-up studies, or other distinct points, use a numbered or bulleted list. Develop each point with at least 3 complete sentences and enough explanation for it to stand on its own. " +
+      "For questions that ask for an overall interpretation, explanation, comparison, or judgment, use a paragraph unless a list would make the answer clearer. " +
       "Do not include a heading, introduction, or concluding summary. " +
       "Avoid overlapping points, unsupported labels, sentence fragments, or repetitive explanations. " +
       "If the question contains several parts, address each part briefly when possible. Always complete the final sentence. " +
