@@ -348,6 +348,33 @@ const PAPERS = {
           'C. A rental advertisement, a credit-card offer, a social-media post, and an email from a supervisor',
           'D. A legal warning, an insurance notice, a personal invitation, and an online product review'
         ], correct: 'A'
+      },
+      {
+        q: 'Which factor was manipulated between participants?',
+        options: [
+          'A. Message register',
+          'B. Typeface category',
+          'C. Exemplar family',
+          'D. Credibility rating'
+        ], correct: 'C'
+      },
+      {
+        q: 'Which result weakens a reading-difficulty explanation?',
+        options: [
+          'A. Credibility was measured before appropriateness',
+          'B. Exemplar family did not moderate the effect',
+          'C. Reading-ease ratings were similar across conditions',
+          'D. Message wording was counterbalanced across participants'
+        ], correct: 'C'
+      },
+      {
+        q: 'What does the null screen-reading result imply?',
+        options: [
+          'A. Screen exposure played no role in any participant\'s judgments',
+          'B. Recent screen reading did not account for the cohort difference',
+          'C. Younger and older adults reported similar screen-reading habits',
+          'D. Lifetime media exposure was unrelated to typeface credibility'
+        ], correct: 'B'
       }
     ]
   },
@@ -400,6 +427,33 @@ const PAPERS = {
           'C. The hunger-compensation account',
           'D. The calorie-mismeasurement account'
         ], correct: 'B'
+      },
+      {
+        q: 'How did insulin responses differ between the two lunches?',
+        options: [
+          'A. Insulin was higher after the ultra-processed lunch',
+          'B. Insulin was higher after the minimally processed lunch',
+          'C. Insulin was similar after the two lunches',
+          'D. Insulin rose initially, then fell below baseline after both lunches'
+        ], correct: 'A'
+      },
+      {
+        q: 'What mechanism do the authors propose linking food processing to the different metabolic responses?',
+        options: [
+          'A. Ultra-processed foods contain more metabolizable calories than their labels report, even when labeled calories and macronutrients are matched',
+          'B. Additives in ultra-processed foods directly impair insulin signaling, causing glucose to remain elevated throughout the observation period',
+          'C. Greater processing makes food easier to break down and absorb, which may produce a sharper glucose rise, a larger insulin response, and a later decline',
+          'D. Minimally processed foods require more chewing, and the slower eating rate accounts for the observed glucose and insulin differences'
+        ], correct: 'C'
+      },
+      {
+        q: 'Which conclusion cannot be established from this study?',
+        options: [
+          'A. The two lunches produced different short-term glucose responses',
+          'B. The ultra-processed lunch was followed by greater snack intake under the study conditions',
+          'C. Larger glucose drops were associated with greater later snack intake',
+          'D. Regularly eating the ultra-processed lunch would necessarily cause long-term weight gain'
+        ], correct: 'D'
       }
     ]
   },
@@ -451,6 +505,33 @@ const PAPERS = {
           'B. Fulfilled-by-platform listings were lowest and platform-sold listings highest in every category; clothing and storage goods had the highest overall rates',
           'C. Seller-shipped listings were highest only for skincare and phone chargers; platform-sold listings were highest for clothing and storage goods',
           'D. Seller-type rankings varied across categories; clothing had the highest overall rate and skincare had the lowest'
+        ], correct: 'A'
+      },
+      {
+        q: 'Which claim type was not included in the researchers\' listing-accuracy checks?',
+        options: [
+          'A. Dimensions',
+          'B. Materials or ingredients',
+          'C. Capacity or contents',
+          'D. Brand or model'
+        ], correct: 'D'
+      },
+      {
+        q: 'What role did the item-not-as-described return rate play in the study?',
+        options: [
+          'A. It served as the main measure of whether a listing was inaccurate',
+          'B. It served as an outcome used to validate the audit-based mismatch measure',
+          'C. It was used to select listings with a history of buyer complaints',
+          'D. It was used to classify which specific listing claims had failed'
+        ], correct: 'B'
+      },
+      {
+        q: 'What market problem makes inaccurate listings difficult for shoppers to detect before purchase?',
+        options: [
+          'A. Sellers know more about their products than buyers do',
+          'B. Buyers compare too many similar products at once',
+          'C. Marketplaces change product prices too frequently',
+          'D. Sellers use different systems for measuring dimensions'
         ], correct: 'A'
       }
     ]
@@ -1666,6 +1747,9 @@ function renderAllSections() {
   setupSpecifyField('rg-ai-purpose', 'ai_purpose', 'Other');
   renderRadioGroup('rg-ai-tenure', 'ai_tenure', TENURE_OPTIONS);
   renderRadioGroup('rg-ai-understanding', 'ai_understanding', UNDERSTANDING_OPTIONS);
+
+  // End-of-survey follow-up contact consent (rendered on the debrief page).
+  renderRadioGroup('rg-followup-contact', 'followup_contact', ['Yes', 'No']);
 
   // Conditional AI-specific evaluation
   const aiEvalIntroEl = document.getElementById('aiEvaluationIntroText');
@@ -3974,8 +4058,8 @@ function buildQuizPages() {
     const transitionId = 'page-quiz-transition-' + paperId;
     QUIZ_PAGE_IDS.push(transitionId);
     const transitionLead = paperIdx === 0
-      ? 'You will first answer five questions about:'
-      : 'Next, you will answer five questions about:';
+      ? 'You will first answer eight questions about:'
+      : 'Next, you will answer eight questions about:';
     html += `<div class="page quiz-transition-page" id="${transitionId}">
       <div class="quiz-transition-inner">
         <p class="quiz-transition-lead">${escapeHtml(transitionLead)}</p>
